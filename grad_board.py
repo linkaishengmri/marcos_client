@@ -52,13 +52,18 @@ grad_clk_t = 1/lc.fpga_clk_freq_MHz # ~8.14ns period for RP-122
 class OCRA1:
     def __init__(self,
                  server_command_f,
-                 max_update_rate=0.1):
-        """ max_update_rate is in MSPS for updates on a single channel; used to choose the SPI clock divider """
+                 max_update_rate=0.1,
+                 latency=0):
+        """ max_update_rate is in MSPS for updates on a single channel; used to choose the SPI clock divider
+        latency is in us, positive values will lead to updates occurring slightly earlier to correct for them """
 
         spi_cycles_per_tx = 30 # actually 24, but including some overhead
         self.spi_div = int(np.floor(1 / (spi_cycles_per_tx * max_update_rate * grad_clk_t))) - 1
         if self.spi_div > 63:
             self.spi_div = 63 # max value, < 100 ksps
+
+        # 268 = base latency of SPI comms for OCRA1 with default SPI div
+        grad_latency = 268 + int(np.round(latency * lc.fpga_clk_freq_MHz))
 
         # bind function from Experiment class, or replace with something else for debugging
         self.server_command = server_command_f
@@ -69,7 +74,7 @@ class OCRA1:
         self.bin_config = {
             'initial_bufs': np.array([
                 # see marga.sv, gradient control lines (lines 186-190, 05.02.2021)
-                # strobe for both LSB and LSB, reset_n = 1, spi div as given, grad board select (1 = ocra1, 2 = gpa-fhdo)
+                # strobe for both MSB and LSB, reset_n = 1, spi div as given, grad board select (1 = ocra1, 2 = gpa-fhdo)
                 (1 << 9) | (1 << 8) | (self.spi_div << 2) | 1,
                 0, 0,
                 0, 0,
@@ -77,7 +82,7 @@ class OCRA1:
                 0, 0, 0, 0, 0, 0,
                 0, 0], dtype=np.uint16),
             'latencies': np.array([
-                0, 268, 268, # grad latencies match SPI div
+                0, grad_latency, grad_latency,
                 0, 0, # rx
                 0, 0, 0, 0, # tx
                 0, 0, 0, 0, 0, 0, # lo phase
@@ -165,8 +170,10 @@ class OCRA1:
 class GPAFHDO:
     def __init__(self,
                  server_command_f,
-                 max_update_rate=0.1):
-        """ max_update_rate is in MSPS for updates on a single channel; used to choose the SPI clock divider """
+                 max_update_rate=0.1,
+                 latency=0):
+        """ max_update_rate is in MSPS for updates on a single channel; used to choose the SPI clock divider
+        latency is in us, positive values will lead to updates occurring slightly earlier to correct for them """
         fhdo_max_update_rate = max_update_rate * 4 # single-channel serial, so needs to be faster
 
         spi_cycles_per_tx = 30 # actually 24, but including some overhead
@@ -175,6 +182,9 @@ class GPAFHDO:
             self.spi_div = 63 # max value, < 100 ksps
 
         self.adc_spi_div = 30 # slow down when ADC transfers are being done
+
+        # 268 = base latency of SPI comms for GPA-FHDO with default SPI div
+        grad_latency = 276 + int(np.round(latency * lc.fpga_clk_freq_MHz))
 
         # bind function from Experiment class, or replace with something else for debugging
         self.server_command = server_command_f
@@ -209,7 +219,7 @@ class GPAFHDO:
                 0, 0, 0, 0, 0, 0,
                 0, 0], dtype=np.uint16),
             'latencies': np.array([
-                0, 276, 276, # grad latencies match SPI div
+                0, grad_latency, grad_latency, # grad latencies match SPI div
                 0, 0, # rx
                 0, 0, 0, 0, # tx
                 0, 0, 0, 0, 0, 0, # lo phase

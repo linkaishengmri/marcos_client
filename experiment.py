@@ -64,6 +64,7 @@ class Experiment:
                  seq_csv=None,
                  rx_lo=0, # which of internal NCO local oscillators (LOs), out of 0, 1, 2, to use for each channel
                  grad_max_update_rate=0.2, # MSPS, across all channels in parallel, best-effort
+                 grad_latency=0,  # us, delay inherent in gradient board + external hardware (positive values are corrected for by shifting the gradient update events back in time)
                  gpa_fhdo_offset_time=0, # when GPA-FHDO is used, offset the Y, Z and Z2 gradient times by 1x, 2x and 3x this value to emulate 'simultaneous' updates
                  print_infos=True, # show server info messages
                  assert_errors=True, # halt on server errors
@@ -107,7 +108,7 @@ class Experiment:
         else:
             gradb_class = gb.GPAFHDO
             self._gpa_fhdo_offset_time = gpa_fhdo_offset_time
-        self.gradb = gradb_class(self.server_command, grad_max_update_rate)
+        self.gradb = gradb_class(self.server_command, grad_max_update_rate, grad_latency)
 
         if initial_wait is None:
             # auto-set the initial wait to be long enough for initial gradient configuration to finish, plus 1us for miscellaneous startup
