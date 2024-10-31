@@ -108,7 +108,8 @@ class Experiment:
         else:
             gradb_class = gb.GPAFHDO
             self._gpa_fhdo_offset_time = gpa_fhdo_offset_time
-        self.gradb = gradb_class(self.server_command, grad_max_update_rate, grad_latency)
+        self.gradb = gradb_class(self.server_command, grad_max_update_rate)
+        self._grad_latency = grad_latency
 
         if initial_wait is None:
             # auto-set the initial wait to be long enough for initial gradient configuration to finish, plus 1us for miscellaneous startup
@@ -193,7 +194,7 @@ class Experiment:
 
         for key, (times, vals) in seq_dict.items():
             # each possible dictionary entry returns a tuple (even if one element) for the binary dictionary to send to marcompile
-            tbin = times_us(times + self._initial_wait),
+            tbin = None  # will be overwritten later
             if key in ['tx0_i', 'tx0_q', 'tx1_i', 'tx1_q']:
                 valbin = tx_real(vals),
                 keybin = key,
@@ -212,7 +213,10 @@ class Experiment:
                 # user the illusion of being able to output on several
                 # channels in parallel
                 if self._gpa_fhdo_offset_time:
-                    tbin = times_us(times + channel*self._gpa_fhdo_offset_time + self._initial_wait),
+                    tbin = times_us(times + channel*self._gpa_fhdo_offset_time + self._initial_wait - self._grad_latency),
+                else:
+                    # compensate latency
+                    tbin = times_us(times + self._initial_wait - self._grad_latency),
 
             elif key in ['rx0_rate', 'rx1_rate']:
                 keybin = key,
@@ -229,6 +233,10 @@ class Experiment:
             else:
                 warnings.warn("Unknown marga experiment dictionary key: " + key)
                 continue
+
+            # default tbin
+            if tbin is None:
+                tbin = times_us(times + self._initial_wait),
 
             for t, k, v in zip(tbin, keybin, valbin):
                 intdict[k] = (t, v)
