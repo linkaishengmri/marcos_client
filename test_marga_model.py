@@ -511,6 +511,24 @@ class ModelTest(unittest.TestCase):
         restore_grad_board()
         self.assertEqual(refl, siml)
 
+    def test_grad_latency_dev_fhd(self):
+        """ Test whether GPA-FHDO gradient event latency is correctly compensated"""
+        set_grad_board("gpa-fhdo")
+        dev_args = {'grad_max_update_rate': 0.1, 'grad_latency': 1/fpga_clk_freq_MHz, 'auto_leds': False}
+        d = {'grad_vx': (np.array([1, 10]), np.array([0.5, 0]))}
+        refl, siml = compare_dev_dict(d, "test_grad_latency_dev_fhd", self.s, self.p, **dev_args)
+        restore_grad_board()
+        self.assertEqual(refl, siml)
+
+    def test_grad_latency_dev_oc1(self):
+        """ Test whether OCRA1 gradient event latency is correctly compensated"""
+        set_grad_board("ocra1")
+        dev_args = {'grad_max_update_rate': 0.1, 'grad_latency': 1/fpga_clk_freq_MHz, 'auto_leds': False} # deliberately slow update rate
+        d = {'grad_vx': (np.array([1, 10]), np.array([0.5, 0])) }
+        refl, siml = compare_dev_dict(d, "test_grad_latency_dev_oc1", self.s, self.p, **dev_args)
+        restore_grad_board()
+        self.assertEqual(refl, siml)
+
     def test_init_grad_dev_fhd(self):
         """ Test whether GPA-FHDO gradient events happening at time = 0 cause errors -- they should not if there's a sufficient initial wait"""
         set_grad_board("gpa-fhdo")

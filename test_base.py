@@ -20,6 +20,11 @@ import pdb
 st = pdb.set_trace
 
 
+# this must happen after the mc and exp imports
+fpga_clk_freq_MHz = 122.88  # only simulate tests for SDRLab-122
+mc.fpga_clk_freq_MHz = fpga_clk_freq_MHz
+exp.fpga_clk_freq_MHz = fpga_clk_freq_MHz
+
 # simulation configuration
 marga_sim_path = os.path.join("..", "marga")
 marga_sim_csv = os.path.join("/tmp", "marga_sim.csv")

@@ -99,6 +99,7 @@ class Device:
                  seq_csv=None,
                  rx_lo=0, # which of internal NCO local oscillators (LOs), out of 0, 1, 2, to use for each channel
                  grad_max_update_rate=0.2, # MSPS, across all channels in parallel, best-effort
+                 grad_latency=0,  # us, delay inherent in gradient board + external hardware (positive values are corrected for by shifting the gradient update events back in time)
                  gpa_fhdo_offset_time=0, # when GPA-FHDO is used, offset the Y, Z and Z2 gradient times by 1x, 2x and 3x this value to emulate 'simultaneous' updates
                  print_infos=True, # show server info messages
                  assert_errors=True, # halt on server errors
@@ -148,6 +149,7 @@ class Device:
             gradb_class = gb.GPAFHDO
             self._gpa_fhdo_offset_time = gpa_fhdo_offset_time
         self.gradb = gradb_class(self.server_command, grad_max_update_rate)
+        self._grad_latency = grad_latency
 
         if initial_wait is None:
             # auto-set the initial wait to be long enough for initial gradient configuration to finish, plus 1us for miscellaneous startup
@@ -234,7 +236,7 @@ class Device:
 
         for key, (times, vals) in seq_dict.items():
             # each possible dictionary entry returns a tuple (even if one element) for the binary dictionary to send to marcompile
-            tbin = times_us(times + self._initial_wait),
+            tbin = None  # will be overwritten later
             if key in ['tx0_i', 'tx0_q', 'tx1_i', 'tx1_q']:
                 valbin = tx_real(vals),
                 keybin = key,
@@ -253,7 +255,10 @@ class Device:
                 # user the illusion of being able to output on several
                 # channels in parallel
                 if self._gpa_fhdo_offset_time:
-                    tbin = times_us(times + channel*self._gpa_fhdo_offset_time + self._initial_wait),
+                    tbin = times_us(times + channel*self._gpa_fhdo_offset_time + self._initial_wait - self._grad_latency),
+                else:
+                    # compensate latency
+                    tbin = times_us(times + self._initial_wait - self._grad_latency),
 
             elif key in ['rx0_rate', 'rx1_rate']:
                 keybin = key,
@@ -273,6 +278,10 @@ class Device:
             else:
                 warnings.warn("Unknown marga experiment dictionary key: " + key)
                 continue
+
+            # default tbin
+            if tbin is None:
+                tbin = times_us(times + self._initial_wait),
 
             for t, k, v in zip(tbin, keybin, valbin):
                 intdict[k] = (t, v)
