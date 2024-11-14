@@ -77,14 +77,14 @@ def set_grad_board(gb):
     global gb_orig, gb_changed
     if not gb_changed:
         gb_orig = mc.grad_board
+    dev.lc.grad_board = gb
     mc.grad_board = gb
-    dev.grad_board = gb
     gb_changed = True
 
 def restore_grad_board():
     global gb_orig, gb_changed
+    dev.lc.grad_board = gb_orig
     mc.grad_board = gb_orig
-    dev.grad_board = gb_orig
     gb_changed = False
 
 def sanitise_arrays(rdata, sdata):
