@@ -95,8 +95,8 @@ class Device:
                  grad_board=lc.grad_board,
                  lo_freq=1, # MHz
                  rx_t=3.125, # us; multiples of 1/122.88, such as 3.125, are exact, others will be rounded to the nearest multiple of the 122.88 MHz clock
-                 seq_dict=None,
-                 seq_csv=None,
+                 seq_dict=None,  # provide upon construction rather than using add_flodict() later
+                 seq_csv=None,  # provide upon construction rather than using add_flodict() later
                  rx_lo=0, # which of internal NCO local oscillators (LOs), out of 0, 1, 2, to use for each channel
                  grad_max_update_rate=0.2, # MSPS, across all channels in parallel, best-effort
                  grad_latency=0,  # us, delay inherent in gradient board + external hardware (positive values are corrected for by shifting the gradient update events back in time)
@@ -377,10 +377,16 @@ class Device:
         self.add_intdict(initial_cfg, append=self._allow_user_init_cfg)
 
         mc.grad_board = self._grad_board  # BAD, SETTING GLOBAL VARIABLE - TODO FIX
-        self._machine_code = np.array( mc.dict2bin(self._seq,
-                                                   self.gradb.bin_config['initial_bufs'],
-                                                   self.gradb.bin_config['latencies'], # TODO: can add extra manipulation here, e.g. add to another array etc
-                                                   self._trig_wait_time), dtype=np.uint32 )
+        if self._csv:  # TODO: handle CSVs in Device class. UNTESTED, SHOULD WORK
+            self._machine_code = np.array( mc.csv2bin(self._csv,
+                                                       self.gradb.bin_config['initial_bufs'],
+                                                       self.gradb.bin_config['latencies'], # TODO: can add extra manipulation here, e.g. add to another array etc
+                                                       self._trig_wait_time), dtype=np.uint32 )
+        else:
+            self._machine_code = np.array( mc.dict2bin(self._seq,
+                                                       self.gradb.bin_config['initial_bufs'],
+                                                       self.gradb.bin_config['latencies'], # TODO: can add extra manipulation here, e.g. add to another array etc
+                                                       self._trig_wait_time), dtype=np.uint32 )
 
         self._seq_compiled = True
 

@@ -23,40 +23,14 @@ class ModelTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # TODO make this check for a file first
-        subprocess.call(["make", "-j4", "-s", "-C", os.path.join(marga_sim_path, "build")])
-        subprocess.call(["fallocate", "-l", "516KiB", "/tmp/marcos_server_mem"])
-        subprocess.call(["killall", "marga_sim"], stderr=subprocess.DEVNULL) # in case other instances were started earlier
-
-        warnings.simplefilter("ignore", mc.MarServerWarning)
+        base_setup_class()
 
     def setUp(self):
-        # start simulation
-        if marga_sim_fst_dump:
-            self.p = subprocess.Popen([os.path.join(marga_sim_path, "build", "marga_sim"), "csv=" + marga_sim_csv, "fst=" + marga_sim_fst],
-                                      stdout=subprocess.DEVNULL,
-                                      stderr=subprocess.STDOUT)
-        else:
-            self.p = subprocess.Popen([os.path.join(marga_sim_path, "build", "marga_sim"), "csv=" + marga_sim_csv],
-                                      stdout=subprocess.DEVNULL,
-                                      stderr=subprocess.STDOUT)
-
-
-        # open socket
-        time.sleep(0.05) # give marga_sim time to start up
-
-        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.s.connect(("localhost", 11111)) # only connect to local simulator
+        self.p, self.s = base_setup()
         self.packet_idx = 0
 
     def tearDown(self):
-        # self.p.terminate() # if not already terminated
-        # self.p.kill() # if not already terminated
-        self.s.close()
-
-        if marga_sim_fst_dump:
-            # open GTKWave
-            os.system("gtkwave " + marga_sim_fst + " " + os.path.join(marga_sim_path, "src", "marga_sim.sav"))
+        base_teardown(self.p, self.s)
 
     ## Tests are approximately in order of complexity
 

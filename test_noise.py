@@ -5,8 +5,6 @@ import matplotlib.pyplot as plt
 from device import Device
 from local_config import grad_board
 
-import pdb
-st = pdb.set_trace
 
 def test_jitter(
         rf_pulse_freq = 2, # MHz

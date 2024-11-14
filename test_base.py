@@ -73,6 +73,44 @@ oc1_config = {
 gb_orig = None
 gb_changed = False
 
+def base_setup_class():
+    # TODO make this check for a file first
+    subprocess.call(["make", "-j4", "-s", "-C", os.path.join(marga_sim_path, "build")])
+    subprocess.call(["fallocate", "-l", "516KiB", "/tmp/marcos_server_mem"])
+    subprocess.call(["killall", "marga_sim"], stderr=subprocess.DEVNULL) # in case other instances were started earlier
+
+    warnings.simplefilter("ignore", mc.MarServerWarning)
+
+
+def base_setup(port=11111):
+    # start simulation
+    if marga_sim_fst_dump:
+        p = subprocess.Popen([os.path.join(marga_sim_path, "build", "marga_sim"), "csv=" + marga_sim_csv, "fst=" + marga_sim_fst],
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.STDOUT)
+    else:
+        p = subprocess.Popen([os.path.join(marga_sim_path, "build", "marga_sim"), "csv=" + marga_sim_csv],
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.STDOUT)
+
+
+    # open socket
+    time.sleep(0.05) # give marga_sim time to start up
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect(("localhost", port)) # only connect to local simulator
+    return p, s
+
+
+def base_teardown(process, socket):
+    # process.terminate() # if not already terminated
+    # process.kill() # if not already terminated
+    socket.close()
+
+    if marga_sim_fst_dump:
+        # open GTKWave
+        os.system("gtkwave " + marga_sim_fst + " " + os.path.join(marga_sim_path, "src", "marga_sim.sav"))
+
 def set_grad_board(gb):
     global gb_orig, gb_changed
     if not gb_changed:
