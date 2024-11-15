@@ -18,7 +18,10 @@ def mimo_dev_run(devt):
     rxd, msgs = dev.run()
     return rxd, msgs
 
-def test_mimo_low_level(sim=True, sock_m=None, sock_s=None, plot_preview=False, plot_data=True):
+
+def test_mimo_lowlevel(
+    sim=False, sock_m=None, sock_s=None, plot_preview=False, plot_data=True
+):
     """Manual 2-board master-slave synchronisation test. Main steps are:
     - start master manually
     - start slave (immediate trigger wait)
@@ -49,15 +52,14 @@ def test_mimo_low_level(sim=True, sock_m=None, sock_s=None, plot_preview=False, 
         master_port = 11111
         slave_port = 11111
 
-    trig_time = (
-        1000  # when to pulse the output trigger after the start of the master sequence
-    )
+    # when to pulse the output trigger after the start of the master sequence
+    trig_time = 1000
+
     if sim:
         trig_wait_time = 1000
     else:
-        trig_wait_time = (
-            16e6  # cycles for slave to wait for trigger arrival before giving up
-        )
+        # cycles for slave to wait for trigger arrival before giving up
+        trig_wait_time = 16e6
 
     start_offset = 20.0
     rx_gate_len = 200.0
@@ -73,8 +75,16 @@ def test_mimo_low_level(sim=True, sock_m=None, sock_s=None, plot_preview=False, 
         "halt_and_reset": False,
     }
 
-    dev_m = Device(ip_address=master_ip, port=master_port, prev_socket=sock_m, **dev_kwargs)
-    dev_s = Device(ip_address=master_ip, port=slave_port, prev_socket=sock_s, trig_wait_time=trig_wait_time, **dev_kwargs)
+    dev_m = Device(
+        ip_address=master_ip, port=master_port, prev_socket=sock_m, **dev_kwargs
+    )
+    dev_s = Device(
+        ip_address=master_ip,
+        port=slave_port,
+        prev_socket=sock_s,
+        trig_wait_time=trig_wait_time,
+        **dev_kwargs
+    )
 
     slave_tx_t = start_offset + np.array(
         [
@@ -116,8 +126,8 @@ def test_mimo_low_level(sim=True, sock_m=None, sock_s=None, plot_preview=False, 
 
     if plot_data:
         for rxd, msgs in res:
-            plt.plot(np.abs(rxd['rx0']) + np.random.random_sample())
-            plt.plot(np.abs(rxd['rx1']) + np.random.random_sample())
+            plt.plot(np.abs(rxd["rx0"]) + np.random.random_sample())
+            plt.plot(np.abs(rxd["rx1"]) + np.random.random_sample())
             print(msgs)
 
         plt.show()
@@ -135,7 +145,7 @@ if __name__ == "__main__":
             fst_dump=False, csv_path=os.path.join("/tmp", "marga_sim_s.csv"), port=11112
         )
 
-        test_mimo_low_level(sim=True, sock_m=sm, sock_s=ss)
+        test_mimo_lowlevel(sim=True, sock_m=sm, sock_s=ss)
 
         # halt simulation
         sc.send_packet(sc.construct_packet({}, 0, command=sc.close_server_pkt), sm)
@@ -144,3 +154,5 @@ if __name__ == "__main__":
         ss.close()
         pm.wait(1)  # wait a short time for simulator to close
         ps.wait(1)
+    else:
+        test_mimo_lowlevel()

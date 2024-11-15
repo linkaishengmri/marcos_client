@@ -11,35 +11,6 @@ import grad_board as gb
 import server_comms as sc
 import marcompile as mc
 
-import pdb
-st = pdb.set_trace
-
-######## TODO: configure the final buffers as well, whether in marcompile or elsewhere
-
-class SDRLabConfig:
-    """ Configuration for an SDRLab device """
-    ip_address="localhost",
-    lo_freq=1, # MHz
-    rx_t=3.125, # us; multiples of 1/122.88, such as 3.125, are exact, others will be rounded to the nearest multiple of the 122.88 MHz clock
-    seq_dict=None,
-    seq_csv=None,
-    rx_lo=0, # which of internal NCO local oscillators (LOs), out of 0, 1, 2, to use for each channel
-    grad_max_update_rate=0.2, # MSPS, across all channels in parallel, best-effort
-    gpa_fhdo_offset_time=0, # when GPA-FHDO is used, offset the Y, Z and Z2 gradient times by 1x, 2x and 3x this value to emulate 'simultaneous' updates
-    print_infos=True, # show server info messages from this device
-    assert_errors=True, # halt on server errors from this device
-    init_gpa=False, # initialise the GPA-FHDO connected to this device (will reset its outputs as soon as the Experiment object is created)
-    initial_wait=None, # initial pause before experiment begins - required to configure the LOs and RX rate; must be at least a few us. Is suitably set based on grad_max_update_rate by default.
-    auto_leds=True, # automatically scan the LED pattern from 0 to 255 as the sequence runs (set to off if you wish to manually control the LEDs)
-    trig_wait_time=0, # nonzero values will add a trigger instruction to the start of the experiment sequence, with a timeout in units of clock cycles. Positive values must be below 2^24 (16,777,215) which is around 0.1s. Negative values will lead to an infinite wait (i.e. never timing out, blocking forever until a trigger arrives.) ## NOTE slave devices must use an infinite wait.
-    prev_socket=None, # previously-opened socket, if want to maintain status etc
-    fix_cic_scale=True, # scale the RX data precisely based on the rate being used; otherwise a 2x variation possible in data amplitude based on rate
-    set_cic_shift=False, # program the CIC internal bit shift to maintain the gain within a factor of 2 independent of rate; required if the open-source CIC is used in the design
-    allow_user_init_cfg=False, # allow user-defined alteration of marga configuration set by init, namely RX rate, LO properties etc; see the compile() method for details
-    halt_and_reset=False, # upon connecting to the server, halt any existing sequences that may be running
-    flush_old_rx=False, # when debugging or developing new code, you may accidentally fill up the RX FIFOs - they will not automatically be cleared in case there is important data inside. Setting this true will always read them out and clear them before running a sequence. More advanced manual code can read RX from existing sequences.
-
-
 
 class Device:
     """Wrapper class for managing a hardware interface to an SDRLab
@@ -107,7 +78,7 @@ class Device:
                  initial_wait=None, # initial pause before experiment begins - required to configure the LOs and RX rate; must be at least a few us. Is suitably set based on grad_max_update_rate by default.
                  auto_leds=True, # automatically scan the LED pattern from 0 to 255 as the sequence runs (set to off if you wish to manually control the LEDs)
                  trig_wait_time=0, # nonzero values will add a trigger instruction to the start of the experiment sequence, with a timeout in units of clock cycles. Positive values must be below 2^24 (16,777,215) which is around 0.1s. Negative values will lead to an infinite wait (i.e. never timing out, blocking forever until a trigger arrives.)
-                 prev_socket=None, # previously-opened socket, if want to maintain status etc
+                 prev_socket=None, # previously-opened socket, if want to maintain status, running a simulation, etc
                  fix_cic_scale=True, # scale the RX data precisely based on the rate being used; otherwise a 2x variation possible in data amplitude based on rate
                  set_cic_shift=False, # program the CIC internal bit shift to maintain the gain within a factor of 2 independent of rate; required if the open-source CIC is used in the design
                  allow_user_init_cfg=False, # allow user-defined alteration of marga configuration set by init, namely RX rate, LO properties etc; see the compile() method for details
