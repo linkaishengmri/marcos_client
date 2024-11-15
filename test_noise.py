@@ -69,7 +69,7 @@ def test_jitter(
 if __name__ == "__main__":
     # slowed down to suit VN's setup, due to GPA-FHDO communication chip being dead
     device_kwargs = {'init_gpa': True, 'grad_max_update_rate': 0.1}
-    loops = int(1e6)
+    loops = int(1e1)
 
     # Enable the test that you want to run below
 

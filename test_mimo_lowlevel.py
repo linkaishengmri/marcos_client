@@ -47,8 +47,8 @@ def test_mimo_lowlevel(
         master_port = 11111
         slave_port = 11112
     else:
-        master_ip = "192.168.1.158"
-        slave_ip = "192.168.1.160"
+        master_ip = "192.168.1.160"
+        slave_ip = "192.168.1.158"
         master_port = 11111
         slave_port = 11111
 
@@ -73,6 +73,7 @@ def test_mimo_lowlevel(
         "print_infos": True,
         "assert_errors": True,
         "halt_and_reset": False,
+        "set_cic_shift": True,
     }
 
     dev_m = Device(
@@ -113,10 +114,11 @@ def test_mimo_lowlevel(
 
     if plot_preview:
         dev_m.plot_sequence()
-        dev_s.plot_sequence()
+        # dev_s.plot_sequence()
         plt.show()
 
-    mpl = [(dev_s, 0), (dev_m, 2)]
+    # mpl = [(dev_s, 0), (dev_m, 2)]
+    mpl = [(dev_m, 0)]
 
     with mp.Pool(2) as p:
         res = p.map(mimo_dev_run, mpl)
@@ -126,15 +128,17 @@ def test_mimo_lowlevel(
 
     if plot_data:
         for rxd, msgs in res:
-            plt.plot(np.abs(rxd["rx0"]) + np.random.random_sample())
-            plt.plot(np.abs(rxd["rx1"]) + np.random.random_sample())
+            plt.plot(np.abs(rxd["rx0"]))
+            plt.plot(np.abs(rxd["rx1"]))
+            # plt.plot(np.abs(rxd["rx0"]) + np.random.random_sample())
+            # plt.plot(np.abs(rxd["rx1"]) + np.random.random_sample())
             print(msgs)
 
         plt.show()
 
 
 if __name__ == "__main__":
-    sim = True
+    sim = False
 
     if sim:
         tb.base_setup_class()
@@ -155,4 +159,4 @@ if __name__ == "__main__":
         pm.wait(1)  # wait a short time for simulator to close
         ps.wait(1)
     else:
-        test_mimo_lowlevel()
+        test_mimo_lowlevel(plot_preview=True)
