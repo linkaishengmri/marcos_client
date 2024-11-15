@@ -2,15 +2,23 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-import sys, os, copy
-from device import Device
+import sys, os, copy, time
+import multiprocessing as mp
 
-# Used only for simulation bring-up/teardown
+from device import Device
 import server_comms as sc
 import test_base as tb
 
 
-def test_mimo_low_level(sim=True):
+def mimo_dev_run(devt):
+    """Allows the parallelisation of Device run() calls, which is essential
+    since the slaves will block otherwise."""
+    dev, delay = devt
+    time.sleep(delay)
+    rxd, msgs = dev.run()
+    return rxd, msgs
+
+def test_mimo_low_level(sim=True, sock_m=None, sock_s=None, plot_preview=False, plot_data=True):
     """Manual 2-board master-slave synchronisation test. Main steps are:
     - start master manually
     - start slave (immediate trigger wait)
@@ -33,9 +41,13 @@ def test_mimo_low_level(sim=True):
     if sim:
         master_ip = "localhost"
         slave_ip = "localhost"
+        master_port = 11111
+        slave_port = 11112
     else:
         master_ip = "192.168.1.158"
         slave_ip = "192.168.1.160"
+        master_port = 11111
+        slave_port = 11111
 
     trig_time = (
         1000  # when to pulse the output trigger after the start of the master sequence
@@ -61,8 +73,8 @@ def test_mimo_low_level(sim=True):
         "halt_and_reset": False,
     }
 
-    dev_m = Device(ip_address=master_ip, **dev_kwargs)
-    dev_s = Device(ip_address=master_ip, trig_wait_time=trig_wait_time, **dev_kwargs)
+    dev_m = Device(ip_address=master_ip, port=master_port, prev_socket=sock_m, **dev_kwargs)
+    dev_s = Device(ip_address=master_ip, port=slave_port, prev_socket=sock_s, trig_wait_time=trig_wait_time, **dev_kwargs)
 
     slave_tx_t = start_offset + np.array(
         [
@@ -89,9 +101,26 @@ def test_mimo_low_level(sim=True):
     dev_m.add_flodict(master_fd)
     dev_s.add_flodict(slave_fd)
 
-    dev_m.plot_sequence()
-    dev_s.plot_sequence()
-    plt.show()
+    if plot_preview:
+        dev_m.plot_sequence()
+        dev_s.plot_sequence()
+        plt.show()
+
+    mpl = [(dev_s, 0), (dev_m, 2)]
+
+    with mp.Pool(2) as p:
+        res = p.map(mimo_dev_run, mpl)
+
+    for dev, _ in mpl:
+        dev.close_server(only_if_sim=True)
+
+    if plot_data:
+        for rxd, msgs in res:
+            plt.plot(np.abs(rxd['rx0']) + np.random.random_sample())
+            plt.plot(np.abs(rxd['rx1']) + np.random.random_sample())
+            print(msgs)
+
+        plt.show()
 
 
 if __name__ == "__main__":
@@ -106,7 +135,7 @@ if __name__ == "__main__":
             fst_dump=False, csv_path=os.path.join("/tmp", "marga_sim_s.csv"), port=11112
         )
 
-        test_mimo_low_level()
+        test_mimo_low_level(sim=True, sock_m=sm, sock_s=ss)
 
         # halt simulation
         sc.send_packet(sc.construct_packet({}, 0, command=sc.close_server_pkt), sm)

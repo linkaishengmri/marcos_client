@@ -154,10 +154,10 @@ def sanitise_arrays(rdata, sdata):
     return rdata, sdata
 
 def compare_csv(fname, sock, proc,
-                 initial_bufs=np.zeros(mc.MARGA_BUFS, dtype=np.uint16),
-                 latencies=np.zeros(mc.MARGA_BUFS, dtype=np.uint32),
-                 self_ref=True # use the CSV source file as the reference file to compare the output with
-                 ):
+                initial_bufs=np.zeros(mc.MARGA_BUFS, dtype=np.uint16),
+                latencies=np.zeros(mc.MARGA_BUFS, dtype=np.uint32),
+                self_ref=True # use the CSV source file as the reference file to compare the output with
+                ):
 
     source_csv = os.path.join("csvs", fname + ".csv")
     lc = mc.csv2bin(source_csv,
@@ -248,7 +248,7 @@ def compare_dev_dict(source_dict, ref_fname, sock, proc,
 
     lo_freq = 1234567890 * 122.88 / 2**31  # Arbitrary default LO frequency for unit tests
     d = dev.Device(ip_address="localhost", port=port,
-                       lo_freq=lo_freq, prev_socket=sock, seq_dict=source_dict, **kwargs)
+                   lo_freq=lo_freq, prev_socket=sock, seq_dict=source_dict, **kwargs)
 
     # run simulation
     rx_data, msgs = run_fn(d)
