@@ -82,14 +82,14 @@ def base_setup_class():
     warnings.simplefilter("ignore", mc.MarServerWarning)
 
 
-def base_setup(port=11111):
+def base_setup(fst_dump=marga_sim_fst_dump, csv_path=marga_sim_csv, fst_path=marga_sim_fst, port=11111):
     # start simulation
     if marga_sim_fst_dump:
-        p = subprocess.Popen([os.path.join(marga_sim_path, "build", "marga_sim"), "csv=" + marga_sim_csv, "fst=" + marga_sim_fst],
+        p = subprocess.Popen([os.path.join(marga_sim_path, "build", "marga_sim"), "csv=" + csv_path, "fst=" + fst_path, "port=" + str(port)],
                                   stdout=subprocess.DEVNULL,
                                   stderr=subprocess.STDOUT)
     else:
-        p = subprocess.Popen([os.path.join(marga_sim_path, "build", "marga_sim"), "csv=" + marga_sim_csv],
+        p = subprocess.Popen([os.path.join(marga_sim_path, "build", "marga_sim"), "csv=" + marga_sim_csv, "port=" + str(port)],
                                   stdout=subprocess.DEVNULL,
                                   stderr=subprocess.STDOUT)
 
@@ -233,11 +233,12 @@ def dev_run(d):
     return rx_data, msgs
 
 def compare_dev_dict(source_dict, ref_fname, sock, proc,
-                      # initial_bufs=np.zeros(mc.MARGA_BUFS, dtype=np.uint16),
-                      # latencies=np.zeros(mc.MARGA_BUFS, dtype=np.uint32),
+                     # initial_bufs=np.zeros(mc.MARGA_BUFS, dtype=np.uint16),
+                     # latencies=np.zeros(mc.MARGA_BUFS, dtype=np.uint32),
                       ignore_start_delay=True,
-                      run_fn=dev_run,
-                      **kwargs):
+                     run_fn=dev_run,
+                     port=11111,
+                     **kwargs):
     """Arguments the same as for compare_dict(), except that the source
     dictionary is in floating-point units, and the kwargs are passed
     to the Device class constructor. Note that the initial_bufs
@@ -246,7 +247,7 @@ def compare_dev_dict(source_dict, ref_fname, sock, proc,
     """
 
     lo_freq = 1234567890 * 122.88 / 2**31  # Arbitrary default LO frequency for unit tests
-    d = dev.Device(ip_address="localhost", port=11111,
+    d = dev.Device(ip_address="localhost", port=port,
                        lo_freq=lo_freq, prev_socket=sock, seq_dict=source_dict, **kwargs)
 
     # run simulation
