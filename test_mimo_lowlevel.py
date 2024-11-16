@@ -14,14 +14,43 @@ def mimo_dev_run(devt):
     """Allows the parallelisation of Device run() calls, which is essential
     since the slaves will block otherwise."""
     dev, delay = devt
-    time.sleep(delay)
+    if delay:
+        time.sleep(delay)
     rxd, msgs = dev.run()
     return rxd, msgs
 
 
-def test_mimo_lowlevel(
-    sim=False, sock_m=None, sock_s=None, plot_preview=False, plot_data=True
-):
+def test_mimo_lowlevel(master_ip="localhost", master_port=11111,
+                       slave_ip="localhost", slave_port=11112,
+                       # existing sockets, if available -- necessary for simulation
+                       master_sock=None, slave_sock=None,
+                       # when to pulse the output trigger after the start of the master sequence
+                       trig_time=200e3,
+                       # how long the slave takes from being triggered by the
+                       # master to beginning its sequence
+                       trig_latency = 6.08,
+                       # how long the slave should wait to get triggered (cycles
+                       # or 256 x cycles, depending on version), -1 = forever or
+                       # until FSM is stopped
+                       trig_wait_time=1000,
+                       # how many RX gates to run
+                       rx_gates=20,
+                       # time to wait between gates
+                       rx_gate_interval=1000e3,
+                       # how long each RX gate is
+                       rx_gate_len=2.0,
+                       # what fraction of the RX gate the RF pulse is on for
+                       rf_pulse_frac=0.5,
+                       # what fraction of the rx_gate_len to move the RF pulse off-centre by
+                       rf_pulse_offset=-0.15,
+                       # amplitudes and phases of TX0 and TX1 pulses
+                       tx0_amp=0.5 + 0.3j,
+                       tx1_amp=0.5 + 0.3j,
+                       # LO freq, MHz
+                       lo_freq = 20,
+                       # RX sampling time, us
+                       rx_t = 0.0326,
+                       plot_preview=False, plot_data=False):
     """Manual 2-board master-slave synchronisation test. Main steps are:
     - start master manually
     - start slave (immediate trigger wait)
@@ -41,47 +70,7 @@ def test_mimo_lowlevel(
     but the jitter should be below one cycle.
     """
 
-    if sim:
-        master_ip = "localhost"
-        slave_ip = "localhost"
-        master_port = 11111
-        slave_port = 11112
-    else:
-        master_ip = "192.168.1.160"
-        slave_ip = "192.168.1.158"
-        master_port = 11111
-        slave_port = 11111
-
-    # when to pulse the output trigger after the start of the master sequence
-    trig_time = 200e3
-
-    # how long the slaves take to get triggered by the master, usec
-    trig_latency = 6.08
-
-    if sim:
-        trig_wait_time = 1000
-    else:
-        # cycles for slave to wait for trigger arrival before giving up
-        # trig_wait_time = int(16e6)
-        # trig_wait_time = 0
-        trig_wait_time = -1
-
-    start_offset = 0
-
-    rx_gates = 20
-    rx_gate_interval = 1000e3  # time to wait between gates
-
-    rx_gate_len = 2.0  # 1us
-    rf_pulse_frac = 0.5  # fraction of rx_gate_len
-    rf_pulse_offset = -0.15  # fraction of rx_gate_len to move
-    tx0_amp = 0.5 + 0.3j
-    tx1_amp = tx0_amp
-
-    lo_freq = 20
-    rx_t = 0.0326
-
     dev_kwargs = {
-        # "lo_freq": 2.5,
         "lo_freq": lo_freq,
         "rx_t": rx_t,
         "print_infos": True,
@@ -93,12 +82,12 @@ def test_mimo_lowlevel(
     }
 
     dev_m = Device(
-        ip_address=master_ip, port=master_port, prev_socket=sock_m, **dev_kwargs
+        ip_address=master_ip, port=master_port, prev_socket=master_sock, **dev_kwargs
     )
     dev_s = Device(
         ip_address=slave_ip,
         port=slave_port,
-        prev_socket=sock_s,
+        prev_socket=slave_sock,
         trig_wait_time=trig_wait_time,
         **dev_kwargs,
     )
@@ -113,7 +102,7 @@ def test_mimo_lowlevel(
     slave_tx_t_start = (0.5 * (1 - rf_pulse_frac) + rf_pulse_offset) * rx_gate_len
     slave_tx_t_end = (0.5 * (1 + rf_pulse_frac) + rf_pulse_offset) * rx_gate_len
     for gate in range(rx_gates):
-        gate_start = start_offset + gate * (rx_gate_len + rx_gate_interval)
+        gate_start = gate * (rx_gate_len + rx_gate_interval)
         slave_tx_t[2 * gate] = gate_start + slave_tx_t_start
         slave_tx_t[2 * gate + 1] = gate_start + slave_tx_t_end
         slave_tx0_amp[2 * gate] = tx0_amp
@@ -151,9 +140,9 @@ def test_mimo_lowlevel(
     dev_s.add_flodict(slave_fd)
 
     if plot_preview:
-        plt.subplot(211)
+        plt.figure()
         dev_m.plot_sequence()
-        plt.subplot(212)
+        plt.figure()
         dev_s.plot_sequence()
         plt.show()
 
@@ -167,109 +156,108 @@ def test_mimo_lowlevel(
         dev.close_server(only_if_sim=True)
 
     if plot_data:
-        if False:
-            for rxd, msgs in res:
-                print(msgs)
+        # Assume master is first in the list, slaves are 2nd and thereafter
+        rxdm, msgsm = res[0]
+        rxds, msgss = res[1]
+        rx_len = 0
+        for k in [rxdm, rxds]:
+            for s in ["rx0", "rx1"]:
+                if rx_len == 0:
+                    rx_len = len(k[s])
+                elif rx_len != len(k[s]):
+                    warnings.warn("RX lengths not all equal -- check timings!")
 
-                # Phase-sensitive, overlapping
-                plt.subplot(211)
-                try:
-                    plt.plot(np.real(rxd["rx0"]))
-                    plt.plot(np.imag(rxd["rx0"]))
-                except KeyError:
-                    pass
-                plt.subplot(212)
-                try:
-                    plt.plot(np.real(rxd["rx1"]))
-                    plt.plot(np.imag(rxd["rx1"]))
-                except KeyError:
-                    pass
-                # plt.plot(np.abs(rxd["rx0"]) + np.random.random_sample())
-                # plt.plot(np.abs(rxd["rx1"]) + np.random.random_sample())
+        plt.figure(figsize=(14, 13))
+        # Phases
+        plt.subplot(211)
+        plt.title(
+            f"{rx_gates} RX gates + TX pulses, {rx_gate_interval/1e3:.2f}ms gate interval, {rx_gate_len:.2f}us gate length, {lo_freq:.2f}MHz LO freq, {1/rx_t:.2f}MHz sample rate"
+        )
+        plt.plot(np.real(rxdm["rx0"]), label="rx0_real")
+        plt.plot(np.imag(rxdm["rx0"]), label="rx0_imag")
+        plt.ylabel("Master RX0")
+        plt.legend()
+        plt.grid(True)
+        plt.subplot(212)
+        plt.ylabel("Slave RX1")
+        plt.plot(np.real(rxds["rx1"]), label="rx1_real")
+        plt.plot(np.imag(rxds["rx1"]), label="rx1_imag")
+        plt.legend()
+        plt.grid(True)
 
-        else:
-            # Assume master is first in the list, slaves are 2nd and thereafter
-            rxdm, msgsm = res[0]
-            rxds, msgss = res[1]
-            rx_len = 0
-            for k in [rxdm, rxds]:
-                for s in ["rx0", "rx1"]:
-                    if rx_len == 0:
-                        rx_len = len(k[s])
-                    elif rx_len != len(k[s]):
-                        warnings.warn("RX lengths not all equal -- check timings!")
+        plt.figure(figsize=(14, 13))
+        # Absolute amplitudes
+        plt.subplot(311)
+        plt.title(
+            f"{rx_gates} RX gates + TX pulses, {rx_gate_interval/1e3:.2f}ms gate interval, {rx_gate_len:.2f}us gate length, {lo_freq:.2f}MHz LO freq, {1/rx_t:.2f}MHz sample rate"
+        )
 
-            plt.figure(figsize=(14, 13))
-            # Phases
-            plt.subplot(211)
-            plt.title(
-                f"{rx_gates} RX gates + TX pulses, {rx_gate_interval/1e3:.2f}ms gate interval, {rx_gate_len:.2f}us gate length, {lo_freq:.2f}MHz LO freq, {1/rx_t:.2f}MHz sample rate"
-            )
-            plt.plot(np.real(rxdm["rx0"]), label="rx0_real")
-            plt.plot(np.imag(rxdm["rx0"]), label="rx0_imag")
-            plt.ylabel("Master RX0")
-            plt.legend()
-            plt.grid(True)
-            plt.subplot(212)
-            plt.ylabel("Slave RX1")
-            plt.plot(np.real(rxds["rx1"]), label="rx1_real")
-            plt.plot(np.imag(rxds["rx1"]), label="rx1_imag")
-            plt.legend()
-            plt.grid(True)
+        plt.plot(np.abs(rxdm["rx0"]), label="rx0")
+        plt.plot(np.abs(rxdm["rx1"]), label="rx1")
+        plt.ylabel("Master")
+        plt.legend()
+        plt.grid(True)
+        plt.subplot(312)
+        plt.ylabel("Slave")
+        plt.plot(np.abs(rxds["rx0"]), label="rx0")
+        plt.plot(np.abs(rxds["rx1"]), label="rx1")
+        plt.legend()
+        plt.grid(True)
+        plt.subplot(313)
+        plt.ylabel("Master RX0 - slave RX1")
 
-            plt.figure(figsize=(14, 13))
-            # Absolute amplitudes
-            plt.subplot(311)
-            plt.title(
-                f"{rx_gates} RX gates + TX pulses, {rx_gate_interval/1e3:.2f}ms gate interval, {rx_gate_len:.2f}us gate length, {lo_freq:.2f}MHz LO freq, {1/rx_t:.2f}MHz sample rate"
-            )
-
-            plt.plot(np.abs(rxdm["rx0"]), label="rx0")
-            plt.plot(np.abs(rxdm["rx1"]), label="rx1")
-            plt.ylabel("Master")
-            plt.legend()
-            plt.grid(True)
-            plt.subplot(312)
-            plt.ylabel("Slave")
-            plt.plot(np.abs(rxds["rx0"]), label="rx0")
-            plt.plot(np.abs(rxds["rx1"]), label="rx1")
-            plt.legend()
-            plt.grid(True)
-            plt.subplot(313)
-            plt.ylabel("Master RX0 - slave RX1")
-
-            rxdm0_abs = np.abs(rxdm["rx0"])
-            rxds1_abs = np.abs(rxds["rx1"])
-            rxdm0_norm = rxdm0_abs / np.mean(rxdm0_abs)
-            rxds1_norm = rxds1_abs / np.mean(rxds1_abs)
-            plt.plot(rxdm0_abs - rxds1_abs, label="rx0_m - rx1_s")
-            plt.plot(rxdm0_norm - rxds1_norm, label="norm(rx0_m) - norm(rx1_s)")
-            plt.legend()
-            plt.grid(True)
+        rxdm0_abs = np.abs(rxdm["rx0"])
+        rxds1_abs = np.abs(rxds["rx1"])
+        rxdm0_norm = rxdm0_abs / np.mean(rxdm0_abs)
+        rxds1_norm = rxds1_abs / np.mean(rxds1_abs)
+        plt.plot(rxdm0_abs - rxds1_abs, label="rx0_m - rx1_s")
+        plt.plot(rxdm0_norm - rxds1_norm, label="norm(rx0_m) - norm(rx1_s)")
+        plt.legend()
+        plt.grid(True)
 
         plt.show()
 
+    return res
+
+
+def test_single_sim(plot_data=False):
+    tb.base_setup_class()
+    pm, sm = tb.base_setup(  # master
+        fst_dump=False, csv_path=os.path.join("/tmp", "marga_sim_m.csv"), port=11111
+    )
+    ps, ss = tb.base_setup(  # slave
+        fst_dump=False, csv_path=os.path.join("/tmp", "marga_sim_s.csv"), port=11112
+    )
+
+    test_mimo_lowlevel(master_ip="localhost", master_port=11111,
+                       slave_ip="localhost", slave_port=11112,
+                       master_sock=sm, slave_sock=ss,
+                       trig_time=1,
+                       rx_gates=100,
+                       rx_gate_interval=0.1,
+                       plot_preview=False, plot_data=plot_data)
+
+    # halt simulation
+    sc.send_packet(sc.construct_packet({}, 0, command=sc.close_server_pkt), sm)
+    sc.send_packet(sc.construct_packet({}, 0, command=sc.close_server_pkt), ss)
+    sm.close()
+    ss.close()
+    pm.wait(1)  # wait a short time for simulator to close
+    ps.wait(1)
+
+
+def test_single(rx_gates=10, rx_gate_interval=1000e3, plot_data=False):
+    test_mimo_lowlevel(master_ip="192.168.1.160", master_port=11111,
+                       slave_ip="192.168.1.158", slave_port=11111,
+                       rx_gates=rx_gates, rx_gate_interval=rx_gate_interval,
+                       plot_preview=False, plot_data=plot_data)
+
+
+def test_repeated(reps=10):
+    pass
+
+
 
 if __name__ == "__main__":
-    sim = False
-
-    if sim:
-        tb.base_setup_class()
-        pm, sm = tb.base_setup(  # master
-            fst_dump=False, csv_path=os.path.join("/tmp", "marga_sim_m.csv"), port=11111
-        )
-        ps, ss = tb.base_setup(  # slave
-            fst_dump=False, csv_path=os.path.join("/tmp", "marga_sim_s.csv"), port=11112
-        )
-
-        test_mimo_lowlevel(sim=True, sock_m=sm, sock_s=ss)
-
-        # halt simulation
-        sc.send_packet(sc.construct_packet({}, 0, command=sc.close_server_pkt), sm)
-        sc.send_packet(sc.construct_packet({}, 0, command=sc.close_server_pkt), ss)
-        sm.close()
-        ss.close()
-        pm.wait(1)  # wait a short time for simulator to close
-        ps.wait(1)
-    else:
-        test_mimo_lowlevel(plot_preview=False)
+    # test_single_sim(plot_data=True)  # to check libraries etc are all correctly configured
+    test_single(rx_gates=5, rx_gate_interval=100e3, plot_data=True)
