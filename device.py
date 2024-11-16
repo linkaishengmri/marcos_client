@@ -78,7 +78,7 @@ class Device:
         init_gpa=False,  # initialise the GPA (will reset its outputs when the Device object is created)
         initial_wait=None,  # initial pause before experiment begins - required to configure the LOs and RX rate; must be at least a few us. Is suitably set based on grad_max_update_rate by default.
         auto_leds=True,  # automatically scan the LED pattern from 0 to 255 as the sequence runs (set to off if you wish to manually control the LEDs)
-        trig_wait_time=0,  # nonzero values will add a trigger instruction to the start of the experiment sequence, with a timeout in units of clock cycles. Positive values must be below 2^24 (16,777,215) which is around 0.1s. Negative values will lead to an infinite wait (i.e. never timing out, blocking forever until a trigger arrives.)
+        trig_timeout=0,  # nonzero values will add a wait-for-trigger instruction to the start of the sequence, with a timeout in microseconds. Positive values must be below 136533 (0.13sec), which is the current limit of marga. Negative values will lead to an infinite wait (i.e. never timing out, blocking forever until a trigger arrives.)
         prev_socket=None,  # previously-opened socket, if want to maintain status, running a simulation, etc
         fix_cic_scale=True,  # scale the RX data precisely based on the rate being used; otherwise a 2x variation possible in data amplitude based on rate
         set_cic_shift=False,  # program the CIC internal bit shift to maintain the gain within a factor of 2 independent of rate; required if the open-source CIC is used in the design
@@ -128,7 +128,7 @@ class Device:
             self._initial_wait = 1 + 1 / grad_max_update_rate
 
         self._auto_leds = auto_leds
-        self._trig_wait_time = trig_wait_time
+        self._trig_wait_time = np.round(trig_timeout * fpga_clk_freq_MHz).astype(np.uint32)
 
         assert (seq_csv is None) or (
             seq_dict is None

@@ -2,7 +2,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-import sys, os, copy, time, warnings
+import copy, os, socket, sys, time, warnings
 import multiprocessing as mp
 
 from device import Device
@@ -25,14 +25,14 @@ def test_mimo_lowlevel(master_ip="localhost", master_port=11111,
                        # existing sockets, if available -- necessary for simulation
                        master_sock=None, slave_sock=None,
                        # when to pulse the output trigger after the start of the master sequence
-                       trig_time=200e3,
+                       trig_time=100e3,
                        # how long the slave takes from being triggered by the
                        # master to beginning its sequence
                        trig_latency = 6.08,
                        # how long the slave should wait to get triggered (cycles
                        # or 256 x cycles, depending on version), -1 = forever or
                        # until FSM is stopped
-                       trig_wait_time=1000,
+                       trig_timeout=10,
                        # how many RX gates to run
                        rx_gates=20,
                        # time to wait between gates
@@ -88,7 +88,7 @@ def test_mimo_lowlevel(master_ip="localhost", master_port=11111,
         ip_address=slave_ip,
         port=slave_port,
         prev_socket=slave_sock,
-        trig_wait_time=trig_wait_time,
+        trig_timeout=trig_timeout,
         **dev_kwargs,
     )
 
@@ -113,11 +113,14 @@ def test_mimo_lowlevel(master_ip="localhost", master_port=11111,
         slave_rx0_en[2 * gate] = 1
         slave_rx1_en[2 * gate] = 1
 
+    # extra ms on the end, to allow for RX to complete
+    end_time = rx_gates * (rx_gate_len + rx_gate_interval) + 1e3
+
     slave_fd = {
         "tx0": (slave_tx_t, slave_tx0_amp),
         "tx1": (slave_tx_t, slave_tx1_amp),
         "tx_gate": (
-            np.array([trig_time * 2, trig_time * 3]),
+            np.array([end_time, end_time + 1]),
             np.array([1, 0]),
         ),  # just to have something at the end of the sequence
         "rx0_en": (slave_rx_t, slave_rx0_en),
@@ -129,7 +132,7 @@ def test_mimo_lowlevel(master_ip="localhost", master_port=11111,
     # 1us trig pulse
     master_fd["trig_out"] = (np.array([trig_time, trig_time + 1]), np.array([1, 0]))
 
-    for key in ["tx0", "tx1", "rx0_en", "rx1_en"]:
+    for key in ["tx0", "tx1", "rx0_en", "rx1_en", "tx_gate"]:
         # shift times by trigger time and trigger latency
         master_fd[key] = (
             master_fd[key][0] + trig_time + trig_latency,
@@ -147,13 +150,13 @@ def test_mimo_lowlevel(master_ip="localhost", master_port=11111,
         plt.show()
 
     mpl = [(dev_m, 0), (dev_s, 0)]
-    # mpl = [(dev_m, 0)]
 
     with mp.Pool(2) as p:
         res = p.map(mimo_dev_run, mpl)
 
     for dev, _ in mpl:
         dev.close_server(only_if_sim=True)
+        dev.__del__()  # manual destructor needed
 
     if plot_data:
         # Assume master is first in the list, slaves are 2nd and thereafter
@@ -167,7 +170,7 @@ def test_mimo_lowlevel(master_ip="localhost", master_port=11111,
                 elif rx_len != len(k[s]):
                     warnings.warn("RX lengths not all equal -- check timings!")
 
-        plt.figure(figsize=(14, 13))
+        plt.figure(figsize=(10, 7))
         # Phases
         plt.subplot(211)
         plt.title(
@@ -185,7 +188,7 @@ def test_mimo_lowlevel(master_ip="localhost", master_port=11111,
         plt.legend()
         plt.grid(True)
 
-        plt.figure(figsize=(14, 13))
+        plt.figure(figsize=(10, 7))
         # Absolute amplitudes
         plt.subplot(311)
         plt.title(
@@ -246,18 +249,92 @@ def test_single_sim(plot_data=False):
     ps.wait(1)
 
 
-def test_single(rx_gates=10, rx_gate_interval=1000e3, plot_data=False):
-    test_mimo_lowlevel(master_ip="192.168.1.160", master_port=11111,
-                       slave_ip="192.168.1.158", slave_port=11111,
-                       rx_gates=rx_gates, rx_gate_interval=rx_gate_interval,
-                       plot_preview=False, plot_data=plot_data)
+def test_single(rx_gates=10, rx_gate_interval=1000e3, plot_data=False,
+                trig_timeout=136533, **kwargs):
+    return test_mimo_lowlevel(rx_gates=rx_gates,
+                              rx_gate_interval=rx_gate_interval,
+                              trig_timeout=trig_timeout,
+                              plot_preview=False, plot_data=plot_data, **kwargs)
 
 
-def test_repeated(reps=10):
-    pass
+def test_repeated(reps=10, plot_persistent=False,
+                  rx_t=0.0326,
+                  master_ip="192.168.1.160",
+                  master_port=11111,
+                  slave_ip="192.168.1.158",
+                  slave_port=11111,
+                  **kwargs):
 
+    resl = []
+    ms = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    ms.connect((master_ip, master_port))
+    ss = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    ss.connect((slave_ip, slave_port))
+
+    for rep in range(reps):
+        print(f"Sequence repetition {rep}")
+        res = test_single(master_sock=ms, slave_sock=ss, rx_t=rx_t, **kwargs)
+        resl.append(res)
+
+    ms.close()
+    ss.close()
+
+    if plot_persistent:
+        for res in resl:
+            rxdm, rxds = res[0][0], res[1][0]
+            plt.subplot(211)
+            xaxis = np.linspace(0, len(rxdm['rx0']) * rx_t, len(rxdm['rx0']))
+            plt.plot(xaxis, np.real(rxdm["rx0"]), 'b', alpha=0.1, label='real')
+            plt.plot(xaxis, np.imag(rxdm['rx0']), 'r', alpha=0.1, label='imag')
+            plt.xlabel('RX time (us)')
+            plt.ylabel("Master RX0")
+            plt.legend(['real', 'imag'])
+            # plt.grid(True)
+            plt.subplot(212)
+            xaxis = np.linspace(0, len(rxds['rx1']) * rx_t, len(rxds['rx1']))
+            plt.plot(xaxis, np.real(rxds["rx1"]), 'b', alpha=0.1, label='real')
+            plt.plot(xaxis, np.imag(rxds["rx1"]), 'r', alpha=0.1, label='imag')
+            plt.xlabel('RX time (us)')
+            plt.ylabel("Slave RX1")
+            plt.legend(['real', 'imag'])
+            # plt.grid(True)
 
 
 if __name__ == "__main__":
-    # test_single_sim(plot_data=True)  # to check libraries etc are all correctly configured
-    test_single(rx_gates=5, rx_gate_interval=100e3, plot_data=True)
+    test_single_simulation = False
+    test_single_real = True
+    test_repeated_real = False
+
+    ## Check that libraries etc are all correctly configured (just simulation)
+    if test_single_simulation:
+        test_single_sim(plot_data=True)
+
+    ## Check basic operation and sync
+    if test_single_real:
+            test_single(rx_gates=10, rx_gate_interval=50e3, rx_gate_len=2,
+                    plot_data=True,
+                    master_ip="192.168.1.160", master_port=11111,
+                    slave_ip="192.168.1.158", slave_port=11111)
+
+    ## Check repeatability over multiple rounds
+    if test_repeated_real:
+        rx_gates = 5
+        reps = 40
+        params_shared = {'reps': reps, 'rx_gates': rx_gates, 'rx_gate_interval': 1e3,
+                         'plot_persistent': True,
+                         'master_ip':"192.168.1.160", 'master_port': 11111,
+                         'slave_ip': "192.168.1.158", 'slave_port':11111,
+                         'rx_gate_len': 10e3, 'rx_t': 30,
+                         'rf_pulse_offset': 0}
+
+        params_unsynced = {'trig_timeout': 0, 'trig_time': 1}
+        params_synced = {'trig_timeout': 100000, 'trig_time': 10e3}
+
+
+        plt.figure(figsize=(10,7))
+        test_repeated(**(params_unsynced | params_shared))
+
+        plt.figure(figsize=(10,7))
+        test_repeated(**(params_synced | params_shared))
+
+        plt.show()
