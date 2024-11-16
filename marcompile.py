@@ -5,6 +5,7 @@ import numpy as np
 import logging
 import warnings
 from marmachine import *
+
 try:
     from local_config import grad_board
 except ModuleNotFoundError:
@@ -14,89 +15,103 @@ grad_data_bufs = (1, 2)
 
 max_removed_instructions = 1000
 
+
 def debug_print(*args, **kwargs):
     # print(*args, **kwargs)
     pass
 
+
 def col2buf(col_idx, value):
-    """ Returns a tuple of (buffer indices), (values), (value masks)
+    """Returns a tuple of (buffer indices), (values), (value masks)
     Value masks specify which bits are actually relevant on the output.
     Can accept arrays of values."""
-    if col_idx in (1, 2, 3, 4): # TX
-        buf_idx = col_idx + 4, # TX0_I, TX0_Q, TX1_I, TX1_Q
-        val = value,
-        mask = 0xffff,
-    elif col_idx in (5, 6, 7, 8, 9, 10, 11, 12): # grad
+    if col_idx in (1, 2, 3, 4):  # TX
+        buf_idx = (col_idx + 4,)  # TX0_I, TX0_Q, TX1_I, TX1_Q
+        val = (value,)
+        mask = (0xFFFF,)
+    elif col_idx in (5, 6, 7, 8, 9, 10, 11, 12):  # grad
         # Only encode value and channel into words here.  Precise
         # timing and broadcast logic will be handled at the next stage
         if grad_board == "gpa-fhdo":
             if col_idx in (9, 10, 11, 12):
-                raise RuntimeError("GPA-FHDO is selected, but you are trying to control OCRA1")
+                raise RuntimeError(
+                    "GPA-FHDO is selected, but you are trying to control OCRA1"
+                )
             grad_chan = col_idx - 5
-            val_full = value | 0x80000 | ( grad_chan << 16 ) | (grad_chan << 25)
+            val_full = value | 0x80000 | (grad_chan << 16) | (grad_chan << 25)
         elif grad_board == "ocra1":
             if col_idx in (5, 6, 7, 8):
-                raise RuntimeError("OCRA1 is selected, but you are trying to control GPA-FHDO")
+                raise RuntimeError(
+                    "OCRA1 is selected, but you are trying to control GPA-FHDO"
+                )
             grad_chan = col_idx - 9
-            val_full = value << 2 | 0x00100000 | (grad_chan << 25) | 0x01000000 # always broadcast by default
+            # always broadcast by default
+            val_full = value << 2 | 0x00100000 | (grad_chan << 25) | 0x01000000
         else:
             raise ValueError("Unknown grad board")
 
-        buf_idx = 2, 1 # GRAD_MSB, GRAD_LSB
-        val = val_full >> 16, val_full & 0xffff
-        mask = 0xffff, 0xffff
-    elif col_idx in (13, 14): # RX rate
-        buf_idx = col_idx - 10, # RX0_RATE, RX1_RATE
-        val = value,
-        mask = 0xffff,
-    elif col_idx in (15, 16): # RX rate valid
-        buf_idx = 16, # RX_CTRL
+        buf_idx = 2, 1  # GRAD_MSB, GRAD_LSB
+        val = val_full >> 16, val_full & 0xFFFF
+        mask = 0xFFFF, 0xFFFF
+    elif col_idx in (13, 14):  # RX rate
+        buf_idx = (col_idx - 10,)  # RX0_RATE, RX1_RATE
+        val = (value,)
+        mask = (0xFFFF,)
+    elif col_idx in (15, 16):  # RX rate valid
+        buf_idx = (16,)  # RX_CTRL
         bit_idx = col_idx - 15
-        val = value << (4 + bit_idx),
-        mask = 0x1 << (4 + bit_idx),
-    elif col_idx in (17, 18): # RX resets, active low
-        buf_idx = 16, # RX_CTRL
+        val = (value << (4 + bit_idx),)
+        mask = (0x1 << (4 + bit_idx),)
+    elif col_idx in (17, 18):  # RX resets, active low
+        buf_idx = (16,)  # RX_CTRL
         bit_idx = col_idx - 17
-        val = value << (6 + bit_idx),
-        mask = 0x1 << (6 + bit_idx),
-    elif col_idx in (19, 20): # RX resets, active low
-        buf_idx = 16, # RX_CTRL
+        val = (value << (6 + bit_idx),)
+        mask = (0x1 << (6 + bit_idx),)
+    elif col_idx in (19, 20):  # RX resets, active low
+        buf_idx = (16,)  # RX_CTRL
         bit_idx = col_idx - 19
-        val = value << (8 + bit_idx),
-        mask = 0x1 << (8 + bit_idx),
-    elif col_idx in (21, 22, 23): # TX/RX gates, external trig
-        buf_idx = 15, # GATES_LEDS
+        val = (value << (8 + bit_idx),)
+        mask = (0x1 << (8 + bit_idx),)
+    elif col_idx in (21, 22, 23):  # TX/RX gates, external trig
+        buf_idx = (15,)  # GATES_LEDS
         bit_idx = col_idx - 21
-        val = value << bit_idx,
-        mask = 0x1 << bit_idx,
-    elif col_idx == 24: # LEDs
-        buf_idx = 15, # GATES_LEDS
-        val = value << 8,
-        mask = 0xff00,
-    elif col_idx in (25, 26, 27): # LO freqs
-        lo_lsb_buf = 9 + 2*(col_idx - 25) # 9, 11 or 13
-        buf_idx = lo_lsb_buf, lo_lsb_buf + 1 # DDS[0,1,2]_PHASE_LSB, DDS[0,1,2]_PHASE_MSB
-        val = value & 0xffff, value >> 16
-        mask = 0xffff, 0x7fff
-    elif col_idx in (28, 29, 30): # LO phase reset
-        lo_msb_buf = 10 + 2*(col_idx - 28) # DDS[0,1,2]_PHASE_MSB
-        buf_idx = lo_msb_buf,
-        val = value << 15,
-        mask = 0x8000,
-    elif col_idx in (31, 32): # LO source for RX demodulation
-        buf_idx = 16, # RX_CTRL
+        val = (value << bit_idx,)
+        mask = (0x1 << bit_idx,)
+    elif col_idx == 24:  # LEDs
+        buf_idx = (15,)  # GATES_LEDS
+        val = (value << 8,)
+        mask = (0xFF00,)
+    elif col_idx in (25, 26, 27):  # LO freqs
+        lo_lsb_buf = 9 + 2 * (col_idx - 25)  # 9, 11 or 13
+        # buf_idx = (lo_lsb_buf, lo_lsb_buf + 1, DDS[0,1,2]_PHASE_LSB, DDS[0,1,2]_PHASE_MSB
+        buf_idx = (
+            lo_lsb_buf,
+            lo_lsb_buf + 1,
+        )
+        val = value & 0xFFFF, value >> 16
+        mask = 0xFFFF, 0x7FFF
+    elif col_idx in (28, 29, 30):  # LO phase reset
+        lo_msb_buf = 10 + 2 * (col_idx - 28)  # DDS[0,1,2]_PHASE_MSB
+        buf_idx = (lo_msb_buf,)
+        val = (value << 15,)
+        mask = (0x8000,)
+    elif col_idx in (31, 32):  # LO source for RX demodulation
+        buf_idx = (16,)  # RX_CTRL
         bit_idx = (col_idx - 31) * 2
-        val = value << bit_idx,
-        mask = 0x0003 << bit_idx,
+        val = (value << bit_idx,)
+        mask = (0x0003 << bit_idx,)
 
     return np.uint16(buf_idx), np.uint16(val), np.uint16(mask)
 
-def csv2bin(path,
-            quick_start=False,
-            initial_bufs=np.zeros(MARGA_BUFS, dtype=np.uint16),
-            latencies=np.zeros(MARGA_BUFS, dtype=np.int32),
-            trig_wait_time=0):
-    """ initial_bufs: starting state of output buffers, to track with instructions
+
+def csv2bin(
+    path,
+    quick_start=False,
+    initial_bufs=np.zeros(MARGA_BUFS, dtype=np.uint16),
+    latencies=np.zeros(MARGA_BUFS, dtype=np.int32),
+    trig_wait_time=0,
+):
+    """initial_bufs: starting state of output buffers, to track with instructions
 
     quick_start: strip out the initial RAM-writing dead time if the CSV was generated by the simulator or similar
 
@@ -114,12 +129,12 @@ def csv2bin(path,
     #
     # Output: corresponding MaRGA buffer index or indices to change
 
-    data = np.loadtxt(path, skiprows=1, delimiter=',', comments='#').astype(np.uint32)
-    with open(path, 'r') as csvf:
-        cols = csvf.readline().strip().split(',')[1:]
+    data = np.loadtxt(path, skiprows=1, delimiter=",", comments="#").astype(np.uint32)
+    with open(path, "r") as csvf:
+        cols = csvf.readline().strip().split(",")[1:]
 
-    if cols[-1] != ' csv_version_0.3':
-        if cols[-1] == ' csv_version_0.2':
+    if cols[-1] != " csv_version_0.3":
+        if cols[-1] == " csv_version_0.2":
             logging.info(f"csv2bin for {path}: '{cols[-1]}' is older CSV format")
         else:
             warnings.warn(f"csv2bin: '{cols[-1]}' unknown CSV format")
@@ -130,14 +145,14 @@ def csv2bin(path,
         data[1:, 0] = data[1:, 0] - data[1, 0] + 10
 
     # Boolean: compare data offset by one row in time
-    data_diff = data[:-1,1:] != data[1:,1:]
+    data_diff = data[:-1, 1:] != data[1:, 1:]
 
     changelist = []
     changelist_grad = []
 
     for k, dd in enumerate(data_diff):
         clocktime = data[k + 1, 0]
-        dw = np.where(dd)[0] # indices where data changed
+        dw = np.where(dd)[0]  # indices where data changed
         for col_idx, value in zip(dw + 1, data[k + 1][dw + 1]):
             buf_idces, vals, masks = col2buf(col_idx, value)
             for bi, v, m in zip(buf_idces, vals, masks):
@@ -149,10 +164,13 @@ def csv2bin(path,
 
     return cl2bin(changelist, changelist_grad, initial_bufs, trig_wait_time)
 
-def dict2bin(sd,
-             initial_bufs=np.zeros(MARGA_BUFS, dtype=np.uint16),
-             latencies=np.zeros(MARGA_BUFS, dtype=np.int32),
-             trig_wait_time=0):
+
+def dict2bin(
+    sd,
+    initial_bufs=np.zeros(MARGA_BUFS, dtype=np.uint16),
+    latencies=np.zeros(MARGA_BUFS, dtype=np.int32),
+    trig_wait_time=0,
+):
     """sd: sequence dictionary, consisting of something in the form of:
 
      {'tx0_i': ( np.array([100, 102, 304, 506]), np.array([1, 200, 65535, 20000]) ),
@@ -174,7 +192,8 @@ def dict2bin(sd,
                'rx0_rate_valid', 'rx1_rate_valid', 'rx0_rst_n', 'rx1_rst_n', 'rx0_en', 'rx1_en',
                'tx_gate', 'rx_gate', 'trig_out', 'leds',
                'lo0_freq', 'lo1_freq', 'lo2_freq', 'lo0_rst', 'lo1_rst', 'lo2_rst',
-               'rx0_lo', 'rx1_lo', ] # TODO: these two rows aren't yet in the CSV and thus aren't tested by test_marga_model.py
+                # TODO: these two rows aren't yet in the CSV and thus aren't tested by test_marga_model.py
+               'rx0_lo', 'rx1_lo', ]
 
     changelist = []
     changelist_grad = []
@@ -200,11 +219,13 @@ def dict2bin(sd,
 
     return cl2bin(changelist, changelist_grad, initial_bufs, trig_wait_time)
 
-def cl2bin(changelist,
-           changelist_grad,
-           initial_bufs=np.zeros(MARGA_BUFS, dtype=np.uint16),
-           trig_wait_time=0):
 
+def cl2bin(
+    changelist,
+    changelist_grad,
+    initial_bufs=np.zeros(MARGA_BUFS, dtype=np.uint16),
+    trig_wait_time=0,
+):
     """Central compilation function. Accepts two changelists:
 
     changelist : for all the direct-buffer outputs (TX, most configurable
@@ -228,24 +249,28 @@ def cl2bin(changelist,
 
     # Process the grad changelist, depending on what GPA is being used etc
     # Sort in pairs of changes, because otherwise channels can get mixed up
-    changelist_grad_paired = [ [k, m] for k, m in zip(changelist_grad[::2], changelist_grad[1::2]) ]
+    changelist_grad_paired = [
+        [k, m] for k, m in zip(changelist_grad[::2], changelist_grad[1::2])
+    ]
     sortfn = lambda change: change[0]
     # changelist_grad.sort(key=sortfn) # sort by time
     sortfn_paired = lambda change: change[0][0]
-    changelist_grad_paired.sort(key=sortfn_paired) # sort by time
-    changelist_grad = [k for sl in changelist_grad_paired for k in sl] # https://stackabuse.com/python-how-to-flatten-list-of-lists/
+    changelist_grad_paired.sort(key=sortfn_paired)  # sort by time
+    changelist_grad = [
+        k for sl in changelist_grad_paired for k in sl
+    ]  # https://stackabuse.com/python-how-to-flatten-list-of-lists/
 
-    t_last = [0, 0] # no updates have previously happened; [LSB, MSB]
-    spi_div = (initial_bufs[0] & 0xfc) >> 2
+    t_last = [0, 0]  # no updates have previously happened; [LSB, MSB]
+    spi_div = (initial_bufs[0] & 0xFC) >> 2
     changelist_grad_shifted = []
-    num_chgs = [0, 0] # [LSB, MSB]
-    grad_vals = [initial_bufs[1], initial_bufs[2]] # [LSB, MSB] current output data
-    grad_vals_old = [0, 0] # [LSB, MSB] previous output data
+    num_chgs = [0, 0]  # [LSB, MSB]
+    grad_vals = [initial_bufs[1], initial_bufs[2]]  # [LSB, MSB] current output data
+    grad_vals_old = [0, 0]  # [LSB, MSB] previous output data
 
     for c in changelist_grad:
         t = c[0]
         debug_print("t: ", t, " t_last: ", t_last, "num_chgs: ", num_chgs, " c: ", c)
-        idx = c[1] - 1 # 0 for LSB, 1 for MSB
+        idx = c[1] - 1  # 0 for LSB, 1 for MSB
         msb = idx == 1
         data = c[2]
         # if data == grad_vals[idx]: # no actual change to buffer output
@@ -258,19 +283,21 @@ def cl2bin(changelist,
             num_chgs[idx] += 1
             # assume the changes in changelist_grad are paired with LSBs/MSBs matching each other's grad channels stored sequentially,
             # and that for each event, the MSB update is first
-            if grad_board == "ocra1": # simultaneous with another grad update
+            if grad_board == "ocra1":  # simultaneous with another grad update
                 if msb:
-                    if num_chgs[1]: # MSB buffer and not the first grad event on this timestep
+                    # MSB buffer and not the first grad event on this timestep
+                    if num_chgs[1]:
                         # turn broadcast off if this isn't the first grad event on this timestep
                         data = data & ~np.uint16(0x0100)
                         # return LSB back to old values, since this one is now done in the past
-                        grad_vals[:] = grad_vals_old # revert the last known buffer values
+                        # revert the last known buffer values
+                        grad_vals[:] = grad_vals_old
                 # else:
                 #     if data == grad_vals[idx]: # no actual change to buffer output compared to earlier LSB at this timestep
                 #         continue # skip this change
 
                 # move non-broadcast events back in time, so that synchronisation will be done in ocra1_iface core
-                changelist_grad_shifted.append( (c[0]-num_chgs[idx], c[1], data, c[3]) )
+                changelist_grad_shifted.append((c[0] - num_chgs[idx], c[1], data, c[3]))
                 num_chgs[idx] += 1
             elif grad_board == "gpa-fhdo":
                 # don't do anything; currently will cause an error
@@ -278,19 +305,22 @@ def cl2bin(changelist,
                 # time for GPA-FHDO
                 changelist_grad_shifted.append(c)
         else:
-            if t - t_last[idx] < 24 * (1 + spi_div) + 2: #
-                warnings.warn("Gradient updates are too frequent for selected SPI divider. Missed samples are likely!", MarGradWarning)
+            if t - t_last[idx] < 24 * (1 + spi_div) + 2:
+                warnings.warn(
+                    "Gradient updates are too frequent for selected SPI divider. Missed samples are likely!",
+                    MarGradWarning,
+                )
 
             # if data == grad_vals[idx]: # no actual change to buffer output
             #     continue # skip this change
 
             t_last[idx] = t
-            grad_vals[idx] = data # update the last known buffer value
+            grad_vals[idx] = data  # update the last known buffer value
             changelist_grad_shifted.append(c)
             num_chgs = [0, 0]
 
     changelist += changelist_grad_shifted
-    changelist.sort(key=sortfn) # sort by time
+    changelist.sort(key=sortfn)  # sort by time
 
     # Track removed instruction events, but only warn when the number exceeds a minimum
     removed_instruction_warnings = []
@@ -308,7 +338,9 @@ def cl2bin(changelist,
             ch_idces = np.where(changed)[0]
             # buf_time_offsets = np.zeros(MARGA_BUFS, dtype=int32)
             buf_time_offsets = 0
-            unique_changes.append( [time, ch_idces, current_bufs[ch_idces], buf_time_offsets] )
+            unique_changes.append(
+                [time, ch_idces, current_bufs[ch_idces], buf_time_offsets]
+            )
             change_masks[:] = np.zeros(MARGA_BUFS, dtype=np.uint16)
             changed[:] = np.zeros(MARGA_BUFS, dtype=bool)
 
@@ -317,14 +349,21 @@ def cl2bin(changelist,
                 close_timestep(current_time)
                 current_time = time
             buf_diff = (current_bufs[buf] ^ val) & mask
-            assert buf_diff & change_masks[buf] == 0, "Tried to set a buffer to two values at once"
+            assert (
+                buf_diff & change_masks[buf] == 0
+            ), "Tried to set a buffer to two values at once"
             if buf_diff == 0:
                 if buf not in (1, 2):
                     # gradient buffers will have unneeded instructions
                     # all the time, so not worth warning the user for
                     # those
-                    removed_instruction_warnings.append( "Instruction at tick {:d}, buffer {:d}, value 0x{:04x}, mask 0x{:04x} will have no effect. Skipping...".format(time, buf, val, mask) )
+                    removed_instruction_warnings.append(
+                        "Instruction at tick {:d}, buffer {:d}, value 0x{:04x}, mask 0x{:04x} will have no effect. Skipping...".format(
+                            time, buf, val, mask
+                        )
+                    )
                 continue
+
             val_masked = val & mask
             old_val_unmasked = current_bufs[buf] & ~mask
             new_val = old_val_unmasked | val_masked
@@ -333,7 +372,6 @@ def cl2bin(changelist,
             changed[buf] = True
 
         close_timestep(current_time)
-
         return unique_changes
 
     changes = cl2ol(changelist)
@@ -342,10 +380,12 @@ def cl2bin(changelist,
     if len(removed_instruction_warnings) > max_removed_instructions:
         for riw in removed_instruction_warnings:
             warnings.warn(riw, MarRemovedInstructionWarning)
-        warnings.warn("NOTE: Fewer than {:d} removed-instruction warnings will not be printed -- keep this in mind when searching for the root cause.".format(max_removed_instructions))
+        warnings.warn(
+            f"NOTE: Fewer than {max_removed_instructions} removed-instruction warnings will not be printed -- keep this in mind when searching for the root cause."
+        )
 
     # Process time offsets
-    for ch, ch_prev in zip( reversed(changes[1:]), reversed(changes[:-1]) ):
+    for ch, ch_prev in zip(reversed(changes[1:]), reversed(changes[:-1])):
         # does the current timestep need to output more data than can
         # fit into the time gap since the previous timestep?
         timestep = np.int32(ch[0] - ch_prev[0])
@@ -353,8 +393,8 @@ def cl2bin(changelist,
         # if timestep < ch[1].size: # not enough time
 
         if timediff > 0:
-            ch_prev[0] -= timediff # move prev. event into the past
-            ch_prev[3] = timediff # make prev. event's buffers output in its future
+            ch_prev[0] -= timediff  # move prev. event into the past
+            ch_prev[3] = timediff  # make prev. event's buffers output in its future
 
     # convert to differential timesteps
     last_time = 0
@@ -378,7 +418,7 @@ def cl2bin(changelist,
     # set initial buffer values in reversed order, so that grad board is enabled
     # last of all (to avoid spurious initial transfer)
     for k, ib in enumerate(reversed(initial_bufs)):
-        bdata.append(instb(MARGA_BUFS-1-k, k, ib))
+        bdata.append(instb(MARGA_BUFS - 1 - k, k, ib))
 
     # for nonzero trigger waits, create a trigger instruction
     if trig_wait_time < 0:
@@ -400,12 +440,13 @@ def cl2bin(changelist,
         # soak up any extra time which is in excess of what the instructions need to execute synchronously
         excess_dtime = dtime - b_instrs
         excess_dtime_tmp = excess_dtime
-        while excess_dtime_tmp > 2: # delay of 3 or more cycles needed
-            wait_time = min(excess_dtime_tmp, COUNTER_MAX + 3) # delay for the time instruction
+        while excess_dtime_tmp > 2:  # delay of 3 or more cycles needed
+            # delay for the time instruction
+            wait_time = min(excess_dtime_tmp, COUNTER_MAX + 3)
             bdata.append(insta(IWAIT, wait_time - 3))
             excess_dtime_tmp -= wait_time
             debug_print("i wait ", wait_time - 3)
-        if excess_dtime_tmp: # final delay of 1 or 2 cycles
+        if excess_dtime_tmp:  # final delay of 1 or 2 cycles
             for k in range(dtime - b_instrs):
                 debug_print("i nop")
                 bdata.append(insta(INOP, 0))
@@ -420,13 +461,17 @@ def cl2bin(changelist,
         buf_time_left -= excess_dtime
         buf_time_left[buf_time_left < 0] = 0
         this_time_offset = event[3]
-        debug_print("--- dtime {:2d}, this_time_offset: {:2d}, b_instrs: {:2d}, lbtl: ".format(dtime, this_time_offset, b_instrs), last_buf_time_left[5:9])
+        debug_print(
+            f"--- dtime {dtime:2d}, this_time_offset: {this_time_offset:2d}, b_instrs: {b_instrs:2d}, lbtl: ",
+            last_buf_time_left[5:9],
+        )
         for m, (ind, dat) in enumerate(zip(event[1], event[2])):
-            execution_delay = b_instrs - m - 1 #+ time - 2
+            execution_delay = b_instrs - m - 1  # + time - 2
             btli = buf_time_left[ind]
             buf_empty = btli <= m
-            if buf_empty: # buffer empty for this instruction; need an appropriate delay only for sync
-                # (check against m since with successive cycles, remaining buffers will empty out)
+            # buffer empty for this instruction; need an appropriate delay only for sync
+            # (check against m since with successive cycles, remaining buffers will empty out)
+            if buf_empty:
                 extra_delay = execution_delay + this_time_offset
                 buf_time_left[ind] = this_time_offset + b_instrs
             else:
@@ -434,34 +479,49 @@ def cl2bin(changelist,
                 extra_delay = this_time_offset - btli + b_instrs - 1
                 buf_time_left[ind] += extra_delay + 1
 
-            debug_print("bti={:d} btli={:d} m={:d} empty={:d} edel={:d} instb i {:d} del {:d} dat {:d}".format(
-                buf_time_left[ind], btli, m, buf_empty, execution_delay, ind, extra_delay, dat))
+            debug_print(
+                "bti={:d} btli={:d} m={:d} empty={:d} edel={:d} instb i {:d} del {:d} dat {:d}".format(
+                    buf_time_left[ind],
+                    btli,
+                    m,
+                    buf_empty,
+                    execution_delay,
+                    ind,
+                    extra_delay,
+                    dat,
+                )
+            )
             bdata.append(instb(ind, extra_delay, dat))
 
-        buf_time_left -= b_instrs # take into account execution time of this timestep
+        buf_time_left -= b_instrs  # take into account execution time of this timestep
 
     # Finish sequence
     bdata.append(insta(IFINISH, 0))
     return bdata
 
+
 CIC_SLOWEST_RATE_NEAREST_POW2 = 1 << np.ceil(np.log2(CIC_SLOWEST_RATE)).astype(int)
+
 
 def cic_words(rate, set_cic_shift=False):
     # Calculate the data words to transfer to the CIC for a given rate
 
     # FLoating-point calculation
-    assert np.all( (CIC_FASTEST_RATE <= rate) & (rate <= CIC_SLOWEST_RATE) ), "RX rate outside valid range"
-    gain_factor_log2 = CIC_STAGES * np.log2( CIC_SLOWEST_RATE_NEAREST_POW2 / rate )
-    gain_shift = np.int32(gain_factor_log2) # rounded down
+    assert np.all(
+        (CIC_FASTEST_RATE <= rate) & (rate <= CIC_SLOWEST_RATE)
+    ), "RX rate outside valid range"
+    gain_factor_log2 = CIC_STAGES * np.log2(CIC_SLOWEST_RATE_NEAREST_POW2 / rate)
+    gain_shift = np.int32(gain_factor_log2)  # rounded down
     a = (1 << CIC_RATE_DATAWIDTH) | gain_shift
     b = (0 << CIC_RATE_DATAWIDTH) | rate
-    excess_factor = 2**(gain_factor_log2 - gain_shift)
+    excess_factor = 2 ** (gain_factor_log2 - gain_shift)
     # b = (2 << rate_datawidth) | int(factor_excess * (1 << (rate_datawidth - 1)) ) # TODO: tell Benjamin about assumed 1 - i.e. save a bit for multiplicand by assuming it's between 1 and 2
 
     if set_cic_shift:
         return (a, b), excess_factor
     else:
         return (b,), excess_factor
+
 
 if __name__ == "__main__":
     csv2bin("/tmp/marga.csv")

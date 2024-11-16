@@ -13,10 +13,11 @@ import device as dev
 
 # Logger: uncomment to save test logging information to file
 if False:
-    logging.basicConfig(filename='test_base.log', level=logging.DEBUG)
+    logging.basicConfig(filename="test_base.log", level=logging.DEBUG)
 
 # PDB shorthand
 import pdb
+
 st = pdb.set_trace
 
 
@@ -77,7 +78,8 @@ def base_setup_class():
     # TODO make this check for a file first
     subprocess.call(["make", "-j4", "-s", "-C", os.path.join(marga_sim_path, "build")])
     subprocess.call(["fallocate", "-l", "516KiB", "/tmp/marcos_server_mem"])
-    subprocess.call(["killall", "marga_sim"], stderr=subprocess.DEVNULL) # in case other instances were started earlier
+    # in case other instances were started earlier
+    subprocess.call(["killall", "marga_sim"], stderr=subprocess.DEVNULL)
 
     warnings.simplefilter("ignore", mc.MarServerWarning)
 
@@ -109,7 +111,13 @@ def base_teardown(process, socket):
 
     if marga_sim_fst_dump:
         # open GTKWave
-        os.system("gtkwave " + marga_sim_fst + " " + os.path.join(marga_sim_path, "src", "marga_sim.sav"))
+        os.system(
+            "gtkwave "
+            + marga_sim_fst
+            + " "
+            + os.path.join(marga_sim_path, "src", "marga_sim.sav")
+        )
+
 
 def set_grad_board(gb):
     global gb_orig, gb_changed
@@ -119,15 +127,17 @@ def set_grad_board(gb):
     mc.grad_board = gb
     gb_changed = True
 
+
 def restore_grad_board():
     global gb_orig, gb_changed
     dev.lc.grad_board = gb_orig
     mc.grad_board = gb_orig
     gb_changed = False
 
+
 def sanitise_arrays(rdata, sdata):
-    rdata[1:,0] -= rdata[1,0] # subtract off initial offset time
-    sdata[1:,0] -= sdata[1,0] # subtract off initial offset time
+    rdata[1:, 0] -= rdata[1, 0]  # subtract off initial offset time
+    sdata[1:, 0] -= sdata[1, 0]  # subtract off initial offset time
 
     csv_v03_cols = 31  # columns in v0.3 of CSV format
     csv_v02_cols = 25  # columns in v0.2 of CSV format
@@ -137,13 +147,25 @@ def sanitise_arrays(rdata, sdata):
     sdata_v03 = sdata_cols == csv_v03_cols
 
     # both sets of CSV data must be converted to same format
-    if  rdata_v03 != sdata_v03 and ( (rdata_cols == csv_v02_cols) or (sdata_cols == csv_v02_cols) ):
-        logging.info(f"{inspect.getouterframes(inspect.currentframe(), 1)[2][3]}: Incompatible CSV formats. Attempting to compare only v0.2 subset.")
+    if rdata_v03 != sdata_v03 and (
+        (rdata_cols == csv_v02_cols) or (sdata_cols == csv_v02_cols)
+    ):
+        logging.info(
+            f"{inspect.getouterframes(inspect.currentframe(), 1)[2][3]}: Incompatible CSV formats. Attempting to compare only v0.2 subset."
+        )
+
         def v03tov02(mat, mat_old):
             # convert matrix format from CSV v0.3 (DDS included) to CSV v0.2 (DDS not included)
-            if np.array_equal(mat[:2,0], mat_old[:2,0]) and np.array_equal(mat[3:,0], mat_old[2:,0]) and mat.shape[0] > 2 and mat[2,0] == 1:
-                mat = np.vstack([mat[:2,:], mat[3:,:]])  # remove row caused by DDS phase clear, but check that the rest of the diffs match precisely
-            return mat[:,:25]
+            if (
+                np.array_equal(mat[:2, 0], mat_old[:2, 0])
+                and np.array_equal(mat[3:, 0], mat_old[2:, 0])
+                and mat.shape[0] > 2
+                and mat[2, 0] == 1
+            ):
+                mat = np.vstack(
+                    [mat[:2, :], mat[3:, :]]
+                )  # remove row caused by DDS phase clear, but check that the rest of the diffs match precisely
+            return mat[:, :25]
 
         if rdata_v03:
             rdata = v03tov02(rdata, sdata)
@@ -153,29 +175,38 @@ def sanitise_arrays(rdata, sdata):
 
     return rdata, sdata
 
-def compare_csv(fname, sock, proc,
-                initial_bufs=np.zeros(mc.MARGA_BUFS, dtype=np.uint16),
-                latencies=np.zeros(mc.MARGA_BUFS, dtype=np.uint32),
-                self_ref=True # use the CSV source file as the reference file to compare the output with
-                ):
+
+def compare_csv(
+    fname,
+    sock,
+    proc,
+    initial_bufs=np.zeros(mc.MARGA_BUFS, dtype=np.uint16),
+    latencies=np.zeros(mc.MARGA_BUFS, dtype=np.uint32),
+    self_ref=True,  # use the CSV source file as the reference file to compare the output with
+):
 
     source_csv = os.path.join("csvs", fname + ".csv")
-    lc = mc.csv2bin(source_csv,
-                    quick_start=False, initial_bufs=initial_bufs, latencies=latencies)
+    lc = mc.csv2bin(
+        source_csv, quick_start=False, initial_bufs=initial_bufs, latencies=latencies
+    )
     data = np.array(lc, dtype=np.uint32)
 
     # run simulation
-    rx_data, msgs = sc.command({'run_seq': data.tobytes()} , sock)
+    rx_data, msgs = sc.command({"run_seq": data.tobytes()}, sock)
 
     # halt simulation
     sc.send_packet(sc.construct_packet({}, 0, command=sc.close_server_pkt), sock)
     sock.close()
-    proc.wait(1) # wait a short time for simulator to close
+    proc.wait(1)  # wait a short time for simulator to close
 
     # compare resultant CSV with the reference
     if self_ref:
-        rdata = np.loadtxt(source_csv, skiprows=1, delimiter=',', comments='#').astype(np.uint32)
-        sdata = np.loadtxt(marga_sim_csv, skiprows=1, delimiter=',', comments='#').astype(np.uint32)
+        rdata = np.loadtxt(source_csv, skiprows=1, delimiter=",", comments="#").astype(
+            np.uint32
+        )
+        sdata = np.loadtxt(
+            marga_sim_csv, skiprows=1, delimiter=",", comments="#"
+        ).astype(np.uint32)
         rdata, sdata = sanitise_arrays(rdata, sdata)
         return rdata.tolist(), sdata.tolist()
     else:
@@ -186,22 +217,27 @@ def compare_csv(fname, sock, proc,
             siml = sim.read().splitlines()
         return refl, siml
 
-def compare_dict(source_dict, ref_fname, sock, proc,
-                 initial_bufs=np.zeros(mc.MARGA_BUFS, dtype=np.uint16),
-                 latencies=np.zeros(mc.MARGA_BUFS, dtype=np.uint32),
-                 ignore_start_delay=True
-                 ):
+
+def compare_dict(
+    source_dict,
+    ref_fname,
+    sock,
+    proc,
+    initial_bufs=np.zeros(mc.MARGA_BUFS, dtype=np.uint16),
+    latencies=np.zeros(mc.MARGA_BUFS, dtype=np.uint32),
+    ignore_start_delay=True,
+):
 
     lc = mc.dict2bin(source_dict, initial_bufs=initial_bufs, latencies=latencies)
     data = np.array(lc, dtype=np.uint32)
 
     # run simulation
-    rx_data, msgs = sc.command({'run_seq': data.tobytes()} , sock)
+    rx_data, msgs = sc.command({"run_seq": data.tobytes()}, sock)
 
     # halt simulation
     sc.send_packet(sc.construct_packet({}, 0, command=sc.close_server_pkt), sock)
     sock.close()
-    proc.wait(1) # wait a short time for simulator to close
+    proc.wait(1)  # wait a short time for simulator to close
 
     ref_csv = os.path.join("csvs", ref_fname + ".csv")
     with open(ref_csv, "r") as ref:
@@ -212,8 +248,12 @@ def compare_dict(source_dict, ref_fname, sock, proc,
 
     ref_csv = os.path.join("csvs", ref_fname + ".csv")
     if ignore_start_delay:
-        rdata = np.loadtxt(ref_csv, skiprows=1, delimiter=',', comments='#').astype(np.uint32)
-        sdata = np.loadtxt(marga_sim_csv, skiprows=1, delimiter=',', comments='#').astype(np.uint32)
+        rdata = np.loadtxt(ref_csv, skiprows=1, delimiter=",", comments="#").astype(
+            np.uint32
+        )
+        sdata = np.loadtxt(
+            marga_sim_csv, skiprows=1, delimiter=",", comments="#"
+        ).astype(np.uint32)
         rdata, sdata = sanitise_arrays(rdata, sdata)
         return rdata.tolist(), sdata.tolist()
     else:
@@ -222,6 +262,7 @@ def compare_dict(source_dict, ref_fname, sock, proc,
         with open(marga_sim_csv, "r") as sim:
             siml = sim.read().splitlines()
         return refl, siml
+
 
 def dev_run(d):
     """Function for customising how compare_dev_dict() runs Device tests;
@@ -232,13 +273,19 @@ def dev_run(d):
     rx_data, msgs = d.run()
     return rx_data, msgs
 
-def compare_dev_dict(source_dict, ref_fname, sock, proc,
-                     # initial_bufs=np.zeros(mc.MARGA_BUFS, dtype=np.uint16),
-                     # latencies=np.zeros(mc.MARGA_BUFS, dtype=np.uint32),
-                      ignore_start_delay=True,
-                     run_fn=dev_run,
-                     port=11111,
-                     **kwargs):
+
+def compare_dev_dict(
+    source_dict,
+    ref_fname,
+    sock,
+    proc,
+    # initial_bufs=np.zeros(mc.MARGA_BUFS, dtype=np.uint16),
+    # latencies=np.zeros(mc.MARGA_BUFS, dtype=np.uint32),
+    ignore_start_delay=True,
+    run_fn=dev_run,
+    port=11111,
+    **kwargs,
+):
     """Arguments the same as for compare_dict(), except that the source
     dictionary is in floating-point units, and the kwargs are passed
     to the Device class constructor. Note that the initial_bufs
@@ -246,9 +293,17 @@ def compare_dev_dict(source_dict, ref_fname, sock, proc,
     classes in grad_board.py.
     """
 
-    lo_freq = 1234567890 * 122.88 / 2**31  # Arbitrary default LO frequency for unit tests
-    d = dev.Device(ip_address="localhost", port=port,
-                   lo_freq=lo_freq, prev_socket=sock, seq_dict=source_dict, **kwargs)
+    lo_freq = (
+        1234567890 * 122.88 / 2**31
+    )  # Arbitrary default LO frequency for unit tests
+    d = dev.Device(
+        ip_address="localhost",
+        port=port,
+        lo_freq=lo_freq,
+        prev_socket=sock,
+        seq_dict=source_dict,
+        **kwargs,
+    )
 
     # run simulation
     rx_data, msgs = run_fn(d)
@@ -256,7 +311,7 @@ def compare_dev_dict(source_dict, ref_fname, sock, proc,
     # halt simulation
     sc.send_packet(sc.construct_packet({}, 0, command=sc.close_server_pkt), sock)
     sock.close()
-    proc.wait(1) # wait a short time for simulator to close
+    proc.wait(1)  # wait a short time for simulator to close
 
     ref_csv = os.path.join("csvs", ref_fname + ".csv")
     with open(ref_csv, "r") as ref:
@@ -267,8 +322,12 @@ def compare_dev_dict(source_dict, ref_fname, sock, proc,
 
     ref_csv = os.path.join("csvs", ref_fname + ".csv")
     if ignore_start_delay:
-        rdata = np.loadtxt(ref_csv, skiprows=1, delimiter=',', comments='#').astype(np.uint32)
-        sdata = np.loadtxt(marga_sim_csv, skiprows=1, delimiter=',', comments='#').astype(np.uint32)
+        rdata = np.loadtxt(ref_csv, skiprows=1, delimiter=",", comments="#").astype(
+            np.uint32
+        )
+        sdata = np.loadtxt(
+            marga_sim_csv, skiprows=1, delimiter=",", comments="#"
+        ).astype(np.uint32)
         rdata, sdata = sanitise_arrays(rdata, sdata)
         return rdata.tolist(), sdata.tolist()
     else:

@@ -12,6 +12,7 @@
 
 from test_base import *
 
+
 class ModelTest(unittest.TestCase):
     """Main test class for general HDL and compiler development/debugging;
     inputs to the API and UUT are either a CSV file or a dictionary,
@@ -35,95 +36,95 @@ class ModelTest(unittest.TestCase):
     ## Tests are approximately in order of complexity
 
     def test_single(self):
-        """ Basic state change on a single buffer """
+        """Basic state change on a single buffer"""
         refl, siml = compare_csv("test_single", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_four_par(self):
-        """ State change on four buffers in parallel """
+        """State change on four buffers in parallel"""
         refl, siml = compare_csv("test_four_par", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_long_time(self):
-        """ State change on four buffers in parallel """
+        """State change on four buffers in parallel"""
         max_orig = mc.COUNTER_MAX
-        mc.COUNTER_MAX = 0xfff # temporarily reduce max time used by compiler
+        mc.COUNTER_MAX = 0xFFF  # temporarily reduce max time used by compiler
         refl, siml = compare_csv("test_long_time", self.s, self.p)
         mc.COUNTER_MAX = max_orig
         self.assertEqual(refl, siml)
 
     def test_single_quick(self):
-        """ Quick successive state changes on a single buffer 1 cycle apart """
+        """Quick successive state changes on a single buffer 1 cycle apart"""
         refl, siml = compare_csv("test_single_quick", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_single_delays(self):
-        """ State changes on a single buffer with various delays in between"""
+        """State changes on a single buffer with various delays in between"""
         refl, siml = compare_csv("test_single_delays", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_two_quick(self):
-        """ Quick successive state changes on two buffers, one cycle apart """
+        """Quick successive state changes on two buffers, one cycle apart"""
         refl, siml = compare_csv("test_two_quick", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_two_delays(self):
-        """ State changes on two buffers, various delays in between """
+        """State changes on two buffers, various delays in between"""
         refl, siml = compare_csv("test_two_delays", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_three_quick(self):
-        """ Quick successive state changes on two buffers, one cycle apart """
+        """Quick successive state changes on two buffers, one cycle apart"""
         refl, siml = compare_csv("test_three_quick", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_three_delays(self):
-        """ Successive state changes on three buffers, two cycles apart """
+        """Successive state changes on three buffers, two cycles apart"""
         refl, siml = compare_csv("test_three_delays", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_mult_quick(self):
-        """ Quick successive state changes on multiple buffers, 1 cycle apart """
+        """Quick successive state changes on multiple buffers, 1 cycle apart"""
         refl, siml = compare_csv("test_mult_quick", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_many_quick(self):
-        """ Many quick successive state changes on multiple buffers, all 1 cycle apart """
+        """Many quick successive state changes on multiple buffers, all 1 cycle apart"""
         refl, siml = compare_csv("test_many_quick", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_stream_quick(self):
-        """ Bursts of state changes on multiple buffers with uneven gaps for each individual buffer, each state change 1 cycle apart """
+        """Bursts of state changes on multiple buffers with uneven gaps for each individual buffer, each state change 1 cycle apart"""
         refl, siml = compare_csv("test_stream_quick", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_uneven_times(self):
-        """ Bursts of state changes on multiple buffers with uneven gaps, each state change uneven numbers of cycles apart """
+        """Bursts of state changes on multiple buffers with uneven gaps, each state change uneven numbers of cycles apart"""
         refl, siml = compare_csv("test_uneven_times", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_uneven_sparse(self):
-        """ Bursts of state changes on multiple buffers with uneven gaps, each state change uneven numbers of cycles apart """
+        """Bursts of state changes on multiple buffers with uneven gaps, each state change uneven numbers of cycles apart"""
         refl, siml = compare_csv("test_uneven_sparse", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_cfg(self):
-        """ Configuration and LED bits/words """
+        """Configuration and LED bits/words"""
         refl, siml = compare_csv("test_cfg", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_rx_simple(self):
-        """ RX window with realistic RX rate configuration, resetting and gating """
+        """RX window with realistic RX rate configuration, resetting and gating"""
         refl, siml = compare_csv("test_rx_simple", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_lo_simple(self):
-        """ Simple single LO change """
+        """Simple single LO change"""
         refl, siml = compare_csv("test_lo_simple", self.s, self.p)
         self.assertEqual(refl, siml)
 
     def test_lo_many(self):
-        """ Multiple LO changes and phase resets """
+        """Multiple LO changes and phase resets"""
         refl, siml = compare_csv("test_lo_many", self.s, self.p)
         self.assertEqual(refl, siml)
 
@@ -166,7 +167,7 @@ class ModelTest(unittest.TestCase):
 
     def test_fhd_series(self):
         """Series of state changes on GPA-FHDO x gradient output, default SPI
-        clock divisor """
+        clock divisor"""
         set_grad_board("gpa-fhdo")
         refl, siml = compare_csv("test_fhd_series", self.s, self.p, **fhd_config)
         restore_grad_board()
@@ -195,19 +196,33 @@ class ModelTest(unittest.TestCase):
 
         # Run twice, to catch two different warnings (I couldn't find a more straightforward way to do this)
 
-        with self.assertWarns( RuntimeWarning, msg="expected gpa-fhdo error not observed") as cmr:
+        with self.assertWarns(
+            RuntimeWarning, msg="expected gpa-fhdo error not observed"
+        ) as cmr:
             # with self.assertWarns( RuntimeWarning, msg="SERVER ERROR: gpa-fhdo gradient error; possibly missing samples") as cmr2:
-            refl, siml = compare_csv("test_fhd_too_fast", self.s, self.p, self_ref=False, **fhd_config)
-        with self.assertWarns( UserWarning, msg="expected marcompile warning not observed") as cmu:
+            refl, siml = compare_csv(
+                "test_fhd_too_fast", self.s, self.p, self_ref=False, **fhd_config
+            )
+        with self.assertWarns(
+            UserWarning, msg="expected marcompile warning not observed"
+        ) as cmu:
             self.tearDown()
             self.setUp()
-            refl, siml = compare_csv("test_fhd_too_fast", self.s, self.p, self_ref=False, **fhd_config)
+            refl, siml = compare_csv(
+                "test_fhd_too_fast", self.s, self.p, self_ref=False, **fhd_config
+            )
 
         restore_grad_board()
         # self.assertEqual( str(cm.exception) , "gpa-fhdo gradient error; possibly missing samples")
         # self.assertEqual( str(cmu.warning), "csv2bin: unexpected CSV format")
-        self.assertEqual( str(cmu.warning), "Gradient updates are too frequent for selected SPI divider. Missed samples are likely!")
-        self.assertEqual( str(cmr.warning) , "SERVER ERROR: gpa-fhdo gradient error; possibly missing samples")
+        self.assertEqual(
+            str(cmu.warning),
+            "Gradient updates are too frequent for selected SPI divider. Missed samples are likely!",
+        )
+        self.assertEqual(
+            str(cmr.warning),
+            "SERVER ERROR: gpa-fhdo gradient error; possibly missing samples",
+        )
         self.assertEqual(refl, siml)
 
     def test_oc1_single(self):
@@ -283,21 +298,35 @@ class ModelTest(unittest.TestCase):
         set_grad_board("ocra1")
 
         # Run twice, to catch two different warnings (I couldn't find a more straightforward way to do this)
-        with self.assertWarns( RuntimeWarning, msg="expected ocra1 error not observed") as cmr:
-            refl, siml = compare_csv("test_oc1_too_fast", self.s, self.p, self_ref=False, **oc1_config)
-        with self.assertWarns( UserWarning, msg="expected marcompile warning not observed") as cmu:
+        with self.assertWarns(
+            RuntimeWarning, msg="expected ocra1 error not observed"
+        ) as cmr:
+            refl, siml = compare_csv(
+                "test_oc1_too_fast", self.s, self.p, self_ref=False, **oc1_config
+            )
+        with self.assertWarns(
+            UserWarning, msg="expected marcompile warning not observed"
+        ) as cmu:
             self.tearDown()
             self.setUp()
-            refl, siml = compare_csv("test_oc1_too_fast", self.s, self.p, self_ref=False, **oc1_config)
+            refl, siml = compare_csv(
+                "test_oc1_too_fast", self.s, self.p, self_ref=False, **oc1_config
+            )
             restore_grad_board()
         # self.assertEqual( str(cm.exception) , "gpa-fhdo gradient error; possibly missing samples")
-        self.assertEqual( str(cmu.warning), "Gradient updates are too frequent for selected SPI divider. Missed samples are likely!")
-        self.assertEqual( str(cmr.warning) , "SERVER ERROR: ocra1 gradient error; possibly missing samples")
+        self.assertEqual(
+            str(cmu.warning),
+            "Gradient updates are too frequent for selected SPI divider. Missed samples are likely!",
+        )
+        self.assertEqual(
+            str(cmr.warning),
+            "SERVER ERROR: ocra1 gradient error; possibly missing samples",
+        )
         self.assertEqual(refl, siml)
 
     def test_single_dict(self):
-        """ Basic state change on a single buffer. Dict version"""
-        d = {'tx0_i': (np.array([100]), np.array([10000]))}
+        """Basic state change on a single buffer. Dict version"""
+        d = {"tx0_i": (np.array([100]), np.array([10000]))}
         refl, siml = compare_dict(d, "test_single", self.s, self.p)
         self.assertEqual(refl, siml)
 
@@ -398,160 +427,241 @@ class ModelTest(unittest.TestCase):
     def test_oc1_two_dict(self):
         """Many state changes on OCRA1 gradient outputs, default SPI clock divisor - attempt to probe dict sorting bug."""
         set_grad_board("ocra1")
-        d = {'ocra1_vx': (np.array([600, 900]), np.array([0x10001, 0x20002])),
-             'ocra1_vy': (np.array([600]), np.array([0x10001]))}
+        d = {
+            "ocra1_vx": (np.array([600, 900]), np.array([0x10001, 0x20002])),
+            "ocra1_vy": (np.array([600]), np.array([0x10001])),
+        }
         refl, siml = compare_dict(d, "test_oc1_two_dict", self.s, self.p, **oc1_config)
         restore_grad_board()
         self.assertEqual(refl, siml)
 
     def test_single_dev(self):
-        """ Basic state change on a single buffer. Device version"""
+        """Basic state change on a single buffer. Device version"""
         set_grad_board("gpa-fhdo")
-        d = {'tx0_i': (np.array([1]), np.array([0.5]))}
-        dev_args = {'rx_t': 2, 'auto_leds': False}
+        d = {"tx0_i": (np.array([1]), np.array([0.5]))}
+        dev_args = {"rx_t": 2, "auto_leds": False}
         refl, siml = compare_dev_dict(d, "test_single_dev", self.s, self.p, **dev_args)
         self.assertEqual(refl, siml)
 
         # test for the other grad board
-        self.tearDown(); self.setUp()
+        self.tearDown()
+        self.setUp()
         set_grad_board("ocra1")
         refl, siml = compare_dev_dict(d, "test_single_dev", self.s, self.p, **dev_args)
         restore_grad_board()
         self.assertEqual(refl, siml)
 
     def test_four_par_dev_iq(self):
-        """ State change on four buffers in parallel. Device version using complex inputs"""
-        d = {'tx0': (np.array([1]), np.array([0.5+0.2j])), 'tx1': (np.array([1]), np.array([-0.3+1j]))}
-        dev_args = {'rx_t': 2, 'auto_leds': False}
+        """State change on four buffers in parallel. Device version using complex inputs"""
+        d = {
+            "tx0": (np.array([1]), np.array([0.5 + 0.2j])),
+            "tx1": (np.array([1]), np.array([-0.3 + 1j])),
+        }
+        dev_args = {"rx_t": 2, "auto_leds": False}
         set_grad_board("gpa-fhdo")
-        refl, siml = compare_dev_dict(d, "test_four_par_dev_iq", self.s, self.p, **dev_args)
+        refl, siml = compare_dev_dict(
+            d, "test_four_par_dev_iq", self.s, self.p, **dev_args
+        )
         self.assertEqual(refl, siml)
 
-        self.tearDown(); self.setUp()
+        self.tearDown()
+        self.setUp()
         set_grad_board("ocra1")
-        refl, siml = compare_dev_dict(d, "test_four_par_dev_iq", self.s, self.p, **dev_args)
+        refl, siml = compare_dev_dict(
+            d, "test_four_par_dev_iq", self.s, self.p, **dev_args
+        )
         restore_grad_board()
         self.assertEqual(refl, siml)
 
     def test_uneven_sparse_dev_fhd(self):
-        """ Miscellaneous pulses on TX and gradients, with various acquisition windows """
-        d = {'tx0': (np.array([10,15, 30,35, 100,105]), np.array([1,0, 0.8j,0, 0.7+0.2j,0])),
-             'tx1': (np.array([5,20,  50,70,  110,125]), np.array([-1j,0,  -0.5j,0,  0.5+0.3j,0])),
+        """Miscellaneous pulses on TX and gradients, with various acquisition windows"""
+        d = {
+            "tx0": (
+                np.array([10, 15, 30, 35, 100, 105]),
+                np.array([1, 0, 0.8j, 0, 0.7 + 0.2j, 0]),
+            ),
+            "tx1": (
+                np.array([5, 20, 50, 70, 110, 125]),
+                np.array([-1j, 0, -0.5j, 0, 0.5 + 0.3j, 0]),
+            ),
+            # gradient events may occur only on a single channel at a
+            # time (i.e. no parallel updates) and must be spaced by
+            # at least 4us - i.e. after any update occurs, the next
+            # update (on any channel) may only occur 4us later
+            "grad_vx": (
+                np.array([10, 30, 54, 75, 100]),
+                np.array([-1, 1, 0.5, -0.5, 0]),
+            ),
+            "grad_vy": (
+                np.array([14, 26, 50, 71, 96]),
+                np.array([-1, 1, 0.5, -0.5, 0]),
+            ),
+            "grad_vz": (np.array([6, 22, 79, 88]), np.array([-1, 1, 0.5, 0])),
+            "grad_vz2": (np.array([18, 46, 67, 92]), np.array([-1, 1, 0.5, 0])),
+            "rx0_en": (np.array([7, 12, 30, 40, 80, 90]), np.array([1, 0, 1, 0, 1, 0])),
+            "rx1_en": (np.array([8, 14, 33, 45, 83, 95]), np.array([1, 0, 1, 0, 1, 0])),
+        }
 
-             # gradient events may occur only on a single channel at a
-             # time (i.e. no parallel updates) and must be spaced by
-             # at least 4us - i.e. after any update occurs, the next
-             # update (on any channel) may only occur 4us later
-             'grad_vx': (np.array([ 10, 30, 54, 75, 100]), np.array([-1, 1, 0.5, -0.5, 0])),
-             'grad_vy': (np.array([ 14, 26, 50, 71,  96]), np.array([-1, 1, 0.5, -0.5, 0])),
-             'grad_vz': (np.array([ 6,  22,     79,  88]), np.array([-1, 1,       0.5, 0])),
-             'grad_vz2': (np.array([18,     46, 67,  92]), np.array([-1,      1,  0.5, 0])),
-
-             'rx0_en': (np.array([7,12,  30,40,  80,90]), np.array([1,0, 1,0, 1,0])),
-             'rx1_en': (np.array([8,14,  33,45,  83,95]), np.array([1,0, 1,0, 1,0])),
-             }
-
-        dev_args = {"grad_board": "gpa-fhdo", 'rx_t': 0.5, 'auto_leds': False}
-        refl, siml = compare_dev_dict(d, "test_uneven_sparse_dev_fhd", self.s, self.p, **dev_args)
+        dev_args = {"grad_board": "gpa-fhdo", "rx_t": 0.5, "auto_leds": False}
+        refl, siml = compare_dev_dict(
+            d, "test_uneven_sparse_dev_fhd", self.s, self.p, **dev_args
+        )
         self.assertEqual(refl, siml)
 
     def test_uneven_sparse_dev_oc1(self):
-        """ Miscellaneous pulses on TX and gradients, with various acquisition windows """
-        d = {'tx0': (np.array([10,15, 30,35, 100,105]), np.array([1,0, 0.8j,0, 0.7+0.2j,0])),
-             'tx1': (np.array([5,20,  50,70,  110,125]), np.array([-1j,0,  -0.5j,0,  0.5+0.3j,0])),
+        """Miscellaneous pulses on TX and gradients, with various acquisition windows"""
+        d = {
+            "tx0": (
+                np.array([10, 15, 30, 35, 100, 105]),
+                np.array([1, 0, 0.8j, 0, 0.7 + 0.2j, 0]),
+            ),
+            "tx1": (
+                np.array([5, 20, 50, 70, 110, 125]),
+                np.array([-1j, 0, -0.5j, 0, 0.5 + 0.3j, 0]),
+            ),
+            # gradient events must be spaced by at least 4us -
+            # i.e. after any update occurs, the next update (on any
+            # channel) may only occur 4us later
+            "grad_vx": (
+                np.array([10, 30, 43, 50, 77]),
+                np.array([-1, 1, 0.5, -0.5, 0]),
+            ),
+            "grad_vy": (
+                np.array([15, 23, 43, 57, 84]),
+                np.array([-1, 1, 0.5, -0.5, 0]),
+            ),
+            "grad_vz": (np.array([15, 23, 65, 77]), np.array([-1, 1, 0.5, -0.5, 0])),
+            "grad_vz2": (np.array([15, 43, 65, 77]), np.array([-1, 1, 0.5, -0.5, 0])),
+            "rx0_en": (np.array([7, 12, 30, 40, 80, 90]), np.array([1, 0, 1, 0, 1, 0])),
+            "rx1_en": (np.array([8, 14, 33, 45, 83, 95]), np.array([1, 0, 1, 0, 1, 0])),
+        }
 
-             # gradient events must be spaced by at least 4us -
-             # i.e. after any update occurs, the next update (on any
-             # channel) may only occur 4us later
-             'grad_vx': (np.array([10, 30, 43, 50, 77]), np.array([-1, 1, 0.5, -0.5, 0])),
-             'grad_vy': (np.array([15, 23, 43, 57, 84]), np.array([-1, 1, 0.5, -0.5, 0])),
-             'grad_vz': (np.array([15, 23,     65, 77]), np.array([-1, 1, 0.5, -0.5, 0])),
-             'grad_vz2': (np.array([15,     43, 65, 77]), np.array([-1, 1, 0.5, -0.5, 0])),
-
-             'rx0_en': (np.array([7,12,  30,40,  80,90]), np.array([1,0, 1,0, 1,0])),
-             'rx1_en': (np.array([8,14,  33,45,  83,95]), np.array([1,0, 1,0, 1,0])),
-             }
-
-        dev_args = {'grad_board': 'ocra1', 'rx_t': 0.5, 'auto_leds': False}
-        refl, siml = compare_dev_dict(d, "test_uneven_sparse_dev_oc1", self.s, self.p, **dev_args)
+        dev_args = {"grad_board": "ocra1", "rx_t": 0.5, "auto_leds": False}
+        refl, siml = compare_dev_dict(
+            d, "test_uneven_sparse_dev_oc1", self.s, self.p, **dev_args
+        )
         self.assertEqual(refl, siml)
 
     def test_cic_shift_dev(self):
-        """ Test the experiment code to program the open-source (non-Xilinx) variant of the CIC filter """
+        """Test the experiment code to program the open-source (non-Xilinx) variant of the CIC filter"""
         # d = {'tx0': ( np.array([10, 15]), np.array([0.5, 0]) )}
         set_grad_board("ocra1")
-        dev_args = {'rx_t': 0.5, 'set_cic_shift': True, 'auto_leds': False}
-        refl, siml = compare_dev_dict({}, "test_cic_shift_dev", self.s, self.p, **dev_args)
+        dev_args = {"rx_t": 0.5, "set_cic_shift": True, "auto_leds": False}
+        refl, siml = compare_dev_dict(
+            {}, "test_cic_shift_dev", self.s, self.p, **dev_args
+        )
         restore_grad_board()
         self.assertEqual(refl, siml)
 
     def test_grad_latency_dev_fhd(self):
-        """ Test whether GPA-FHDO gradient event latency is correctly compensated"""
-        dev_args = {'grad_board': 'gpa-fhdo', 'grad_max_update_rate': 0.1, 'grad_latency': 1/fpga_clk_freq_MHz, 'auto_leds': False}
-        d = {'grad_vx': (np.array([1, 10]), np.array([0.5, 0]))}
-        refl, siml = compare_dev_dict(d, "test_grad_latency_dev_fhd", self.s, self.p, **dev_args)
+        """Test whether GPA-FHDO gradient event latency is correctly compensated"""
+        dev_args = {
+            "grad_board": "gpa-fhdo",
+            "grad_max_update_rate": 0.1,
+            "grad_latency": 1 / fpga_clk_freq_MHz,
+            "auto_leds": False,
+        }
+        d = {"grad_vx": (np.array([1, 10]), np.array([0.5, 0]))}
+        refl, siml = compare_dev_dict(
+            d, "test_grad_latency_dev_fhd", self.s, self.p, **dev_args
+        )
         self.assertEqual(refl, siml)
 
     def test_grad_latency_dev_oc1(self):
-        """ Test whether OCRA1 gradient event latency is correctly compensated"""
-        dev_args = {'grad_board': 'ocra1', 'grad_max_update_rate': 0.1, 'grad_latency': 1/fpga_clk_freq_MHz, 'auto_leds': False} # deliberately slow update rate
-        d = {'grad_vx': (np.array([1, 10]), np.array([0.5, 0])) }
-        refl, siml = compare_dev_dict(d, "test_grad_latency_dev_oc1", self.s, self.p, **dev_args)
+        """Test whether OCRA1 gradient event latency is correctly compensated"""
+        dev_args = {
+            "grad_board": "ocra1",
+            "grad_max_update_rate": 0.1,
+            "grad_latency": 1 / fpga_clk_freq_MHz,
+            "auto_leds": False,
+        }  # deliberately slow update rate
+        d = {"grad_vx": (np.array([1, 10]), np.array([0.5, 0]))}
+        refl, siml = compare_dev_dict(
+            d, "test_grad_latency_dev_oc1", self.s, self.p, **dev_args
+        )
         self.assertEqual(refl, siml)
 
     def test_init_grad_dev_fhd(self):
-        """ Test whether GPA-FHDO gradient events happening at time = 0 cause errors -- they should not if there's a sufficient initial wait"""
-        dev_args = {"grad_board": "gpa-fhdo", 'rx_t': 0.5, 'grad_max_update_rate': 0.1, 'auto_leds': False} # deliberately slow update rate
-        d = {'grad_vx': (np.array([0, 5]), np.array([0.5, 0]))}
-        refl, siml = compare_dev_dict(d, "test_init_grad_dev_fhd", self.s, self.p, **dev_args)
+        """Test whether GPA-FHDO gradient events happening at time = 0 cause errors -- they should not if there's a sufficient initial wait"""
+        dev_args = {
+            "grad_board": "gpa-fhdo",
+            "rx_t": 0.5,
+            "grad_max_update_rate": 0.1,
+            "auto_leds": False,
+        }  # deliberately slow update rate
+        d = {"grad_vx": (np.array([0, 5]), np.array([0.5, 0]))}
+        refl, siml = compare_dev_dict(
+            d, "test_init_grad_dev_fhd", self.s, self.p, **dev_args
+        )
         self.assertEqual(refl, siml)
 
     def test_init_grad_dev_oc1(self):
-        """ Test whether OCRA1 gradient events happening at time = 0 cause errors -- they should not if there's a sufficient initial wait."""
-        dev_args = {"grad_board": "ocra1", 'rx_t': 0.5, 'grad_max_update_rate': 0.1, 'auto_leds': False} # deliberately slow update rate
-        d = {'grad_vx': (np.array([0, 20]), np.array([0.5, 0])) }
-        refl, siml = compare_dev_dict(d, "test_init_grad_dev_oc1", self.s, self.p, **dev_args)
+        """Test whether OCRA1 gradient events happening at time = 0 cause errors -- they should not if there's a sufficient initial wait."""
+        dev_args = {
+            "grad_board": "ocra1",
+            "rx_t": 0.5,
+            "grad_max_update_rate": 0.1,
+            "auto_leds": False,
+        }  # deliberately slow update rate
+        d = {"grad_vx": (np.array([0, 20]), np.array([0.5, 0]))}
+        refl, siml = compare_dev_dict(
+            d, "test_init_grad_dev_oc1", self.s, self.p, **dev_args
+        )
         self.assertEqual(refl, siml)
 
     def test_auto_leds_dev(self):
-        """ Test whether the auto-LED scan works correctly """
-        dev_args = {'auto_leds': True}
-        d = {'tx0_i': (np.array([0, 100]), np.array([1, 0])) }
-        refl, siml = compare_dev_dict(d, "test_auto_leds_dev", self.s, self.p, **dev_args)
+        """Test whether the auto-LED scan works correctly"""
+        dev_args = {"auto_leds": True}
+        d = {"tx0_i": (np.array([0, 100]), np.array([1, 0]))}
+        refl, siml = compare_dev_dict(
+            d, "test_auto_leds_dev", self.s, self.p, **dev_args
+        )
         self.assertEqual(refl, siml)
 
     def test_tx_complex_dev(self):
-        """ Test whether the Device class removes duplicate i/q entries for complex TX data """
+        """Test whether the Device class removes duplicate i/q entries for complex TX data"""
         max_rem_instr = mc.max_removed_instructions
         mc.max_removed_instructions = 1
-        dev_args = {'auto_leds': False}
-        d = {'tx0': (np.array([0, 10, 15, 20, 30, 50]), np.array([1-1j, 1+1j, 1j, -1+1j, -1, -1-1j]))}
+        dev_args = {"auto_leds": False}
+        d = {
+            "tx0": (
+                np.array([0, 10, 15, 20, 30, 50]),
+                np.array([1 - 1j, 1 + 1j, 1j, -1 + 1j, -1, -1 - 1j]),
+            )
+        }
         with warnings.catch_warnings():
             warnings.filterwarnings("error", category=mc.MarRemovedInstructionWarning)
-            refl, siml = compare_dev_dict(d, "test_tx_complex_dev", self.s, self.p, **dev_args)
+            refl, siml = compare_dev_dict(
+                d, "test_tx_complex_dev", self.s, self.p, **dev_args
+            )
 
         # restore to default
         mc.max_removed_instructions = max_rem_instr
         self.assertEqual(refl, siml)
 
     def test_lo_change_dev(self):
-        """ Test whether the Device class can handle changes in LO frequency, followed by being rerun """
-        dev_args = {'auto_leds': False}
-        dout = {'tx0': (np.array([0, 1]), np.array([0.5, 0])), 'rx0_en': (np.array([2, 3]), np.array([1, 0]))}
+        """Test whether the Device class can handle changes in LO frequency, followed by being rerun"""
+        dev_args = {"auto_leds": False}
+        dout = {
+            "tx0": (np.array([0, 1]), np.array([0.5, 0])),
+            "rx0_en": (np.array([2, 3]), np.array([1, 0])),
+        }
 
         def change_lo(d):
-            d.run() # compile internally
+            d.run()  # compile internally
             d.set_lo_freq(2)
-            return d.run() # compile internally
+            return d.run()  # compile internally
 
         # with warnings.catch_warnings():
         #     warnings.filterwarnings("ignore", category=RuntimeWarning) # catch GPA-FHDO error due to re-initialisation
-        refl, siml = compare_dev_dict(dout, "test_lo_change_dev", self.s, self.p, run_fn=change_lo, **dev_args)
+        refl, siml = compare_dev_dict(
+            dout, "test_lo_change_dev", self.s, self.p, run_fn=change_lo, **dev_args
+        )
         self.assertEqual(refl, siml)
 
     def test_lo_modulate_dev(self):
-        """ Test whether time-synchronous modulation of LO frequencies are correctly applied """
-        dev_args = {'auto_leds': False, "allow_user_init_cfg": True}
+        """Test whether time-synchronous modulation of LO frequencies are correctly applied"""
+        dev_args = {"auto_leds": False, "allow_user_init_cfg": True}
 
         def rfconv(f):
             # convert value of f in machine units to floating-point,
@@ -559,12 +669,17 @@ class ModelTest(unittest.TestCase):
             # easy simulation viewing/comparisons
             return f * 122.88 / (2**31)
 
-        d = {'lo0_freq': (np.array([0, 0.5]), rfconv(np.array([20, 10]))),
-             'lo1_freq': (np.array([0, 0.8]), rfconv(np.array([30, 40]))),
-             'lo2_freq': (np.array([0, 1.3]), rfconv(np.array([50, 60]))),}
+        d = {
+            "lo0_freq": (np.array([0, 0.5]), rfconv(np.array([20, 10]))),
+            "lo1_freq": (np.array([0, 0.8]), rfconv(np.array([30, 40]))),
+            "lo2_freq": (np.array([0, 1.3]), rfconv(np.array([50, 60]))),
+        }
 
-        refl, siml = compare_dev_dict(d, "test_lo_modulate_dev", self.s, self.p, **dev_args)
+        refl, siml = compare_dev_dict(
+            d, "test_lo_modulate_dev", self.s, self.p, **dev_args
+        )
         self.assertEqual(refl, siml)
+
 
 if __name__ == "__main__":
     unittest.main()
