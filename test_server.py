@@ -171,11 +171,14 @@ class ServerTest(unittest.TestCase):
         SDRLab assembles a packet of length requested by client, and transfers
         it over. Time to carry this out is measured and compared with expected
         values.
+
+        It is recommended that the SDRLab is connected directly to the test PC
+        via an Ethernet cable. The latency otherwise may not be well-controlled.
         """
         real = send_packet(construct_packet({'are_you_real':0}, self.packet_idx), self.s)[4]['are_you_real']
         if real == "hardware":
             samples = [10, 1000, 100000]
-            times = (1.5, 131.0, 158.5) # upper-bound times for network transfers
+            times = (200, 1000, 150000) # upper-bound times for network transfers
         elif real == "simulation":
             samples = [10, 1000, 100000]
             times = (50, 400, 20000) # upper-bound times for network transfers
@@ -183,19 +186,24 @@ class ServerTest(unittest.TestCase):
             samples = [10, 1000, 100000]
             times = (50, 400, 30000) # upper-bound times for network transfers
 
-        if real == "hardware":
-            warnings.warn("Non-simulation network test has not yet been benchmarked! Expect this to fail...")
-
+        trials = 10
         for samples_to_send, expected_time in zip(samples, times):
             packet = construct_packet({'test_net':samples_to_send}, self.packet_idx)
-            t_st = timer()
-            reply = send_packet(packet, self.s)
-            t_end = timer()
-            td_us = (t_end - t_st) * 1e6  # us
-            if td_us > expected_time:
-                warnings.warn("Time {:.1f}us longer than expected {:.1f}us".format(td_us, expected_time))
+            td_usl = []
+            for _ in range(trials):
+                t_st = timer()
+                reply = send_packet(packet, self.s)
+                t_end = timer()
+                td_us = (t_end - t_st) * 1e6  # us
+                td_usl.append(td_us)
 
-            # If it's a simulation or software running on a very slow computer, this could potentially fail
+            td_usm = np.median(td_usl)
+            if td_usm > expected_time:
+                warnings.warn(f"Median time {td_usm:.1f}us longer than expected {expected_time:.1f}us. Rerun this test or consider optimising your network.")
+
+            # If it's a simulation or software running on a very slow computer
+            # or a network with a lot of latency, this could potentially fail,
+            # even though it allows for 100x longer times
             self.assertLess(td_us, 100 * expected_time)
 
     def test_fpga_clk(self):
@@ -274,7 +282,8 @@ class ServerTest(unittest.TestCase):
                                       ]}
                           ])
 
-    @unittest.skipUnless(grad_board == "gpa-fhdo", "requires GPA-FHDO board")
+    # @unittest.skipUnless(grad_board == "gpa-fhdo", "requires GPA-FHDO board")
+    @unittest.skip("GPA-FHDO not currently connected")
     def test_grad_adc(self):
         print_adc_reads = False
         # initialise SPI
