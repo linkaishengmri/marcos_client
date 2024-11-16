@@ -1,13 +1,13 @@
 # MaRCoS Client (Modified for Multi-Frequency Settings)
 
-This repository is a fork of [vnegnev/marcos_client](https://github.com/vnegnev/marcos_client), extending its functionality to handle multi-frequency settings in MRI experiments.  [Under development!]
+This repository is a fork of [vnegnev/marcos_client](https://github.com/vnegnev/marcos_client), extending its functionality to handle multi-frequency settings in MRI experiments. 
 
 ## Main Modifications  
 
 The original `experiment.py` lacked support for multi-frequency configurations, which meant only a single carrier frequency could be set during a sequence. This limitation made it unsuitable for applications such as multi-slice 2D acquisitions.  
 
 The FPGA backend supports dynamic updates to frequency (`lo0_freq`, `lo1_freq`, `lo2_freq`) and resets (`lo0_rst`, `lo1_rst`, `lo2_rst`) at specific sequence nodes. To leverage this capability, this fork introduces a new file, `experiment_multifreq.py`, which includes:  
-- A reimplementation of the `compile()` and `run()` functions, enabling frequency adjustments during sequence execution.  
+- A reimplementation of the `flo2int()` functions, enabling frequency adjustments during sequence execution.  
 - Enhanced support for complex multi-slice MRI acquisitions.  
 
 ## Setup Guide  
