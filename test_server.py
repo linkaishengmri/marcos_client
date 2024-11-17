@@ -51,7 +51,7 @@ class ServerTest(unittest.TestCase):
                                'not all client commands were understood']}
 
         if full_test:
-            versions = [ (1,0,1), (1,0,5), (1,3,100), (1,3,255), (2,5,7), (255,255,255) ]
+            versions = [ (1,0,1), (1,0,6), (1,3,100), (1,3,255), (2,5,7), (255,255,255) ]
             expected_outcomes = [diff_info, diff_equal, diff_warning, diff_warning, diff_error, diff_error]
         else:
             versions = [ (1,0,1) ]
@@ -178,7 +178,7 @@ class ServerTest(unittest.TestCase):
         real = send_packet(construct_packet({'are_you_real':0}, self.packet_idx), self.s)[4]['are_you_real']
         if real == "hardware":
             samples = [10, 1000, 100000]
-            times = (200, 1000, 150000) # upper-bound times for network transfers
+            times = (200, 1000, 100000) # upper-bound times for network transfers
         elif real == "simulation":
             samples = [10, 1000, 100000]
             times = (50, 400, 20000) # upper-bound times for network transfers
@@ -198,6 +198,8 @@ class ServerTest(unittest.TestCase):
                 td_usl.append(td_us)
 
             td_usm = np.median(td_usl)
+            # use for diagnostics
+            # plt.plot(td_usl);plt.xlabel('Trial');plt.ylabel('Time');plt.show()
             if td_usm > expected_time:
                 warnings.warn(f"Median time {td_usm:.1f}us longer than expected {expected_time:.1f}us. Rerun this test or consider optimising your network.")
 
