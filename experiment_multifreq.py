@@ -118,7 +118,7 @@ class ExperimentMultiFreq(Experiment):
                 lo_index = int(key[2]) 
                 if np.issubdtype(vals.dtype, np.floating):
                     valbin = lo_real(vals+self._lo_freqs[lo_index]),
-                    keybin = key,
+                    keybin = key[0:8],
                 else: 
                     assert False, f"The lo_freq is not a np.floating type."# Phase offset setting is not available so far.
             elif key in ['lo0_rst', 'lo1_rst', 'lo2_rst']:
@@ -135,12 +135,13 @@ class ExperimentMultiFreq(Experiment):
     
 if __name__ == "__main__":
     if True:
-        expt = ExperimentMultiFreq(lo_freq=10.36, rx_t=3.125, prev_socket=True)
+        expt = ExperimentMultiFreq(lo_freq=10.36, rx_t=3.125, allow_user_init_cfg=True)
         expt.add_flodict({"rx0_en": (np.array([200, 400, 1200, 1400]), np.array([1, 0, 1, 0]))})
-        expt.add_flodict( {"tx0": (np.array([50, 130, 1050,1130]), np.array([0.5, 0, 0.5, 0]))})
+        expt.add_flodict( {"tx0": (np.array([ 50, 130, 1000050,1130000]), np.array([ 0.5, 0,0.5, 0]))})
         # expt.add_flodict( {"lo0_freq": (np.array([1000]), np.array([10.37]))})
-        expt.add_flodict( {"lo0_freq_offset": (np.array([1000]), np.array([0.01]))}) # offset is 0.01MHz
-        expt.add_flodict( {"lo0_rst": (np.array([1000,1000+1/fpga_clk_freq_MHz]), np.array([1, 0]))})
+        expt.add_flodict( {"lo0_freq_offset": (np.array([1000000]), np.array([-5.01]))}) # offset is 0.01MHz
+        expt.add_flodict( {"lo0_rst": (np.array([10000,1000000+1/fpga_clk_freq_MHz]), np.array([1, 0]))})
         
-        expt.plot_sequence()
-        plt.show()
+        # expt.plot_sequence()
+        # plt.show()
+        rxd, msgs = expt.run()
