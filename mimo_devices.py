@@ -122,8 +122,8 @@ def test_mimo_devices(single=True):
     # importing here to avoid a circular import - these are just throwaway plotting functions
     from test_mimo_lowlevel import plot_single, plot_repeated
 
-    ips = ['192.168.1.160', '192.168.1.158']
-    ports = [11111, 11111]
+    ips = [lc.ip_address, lc.ip_address_slave]
+    ports = [lc.port, lc.port_slave]
 
     # Manually handle sockets if repeated tests are being run
     socks = []

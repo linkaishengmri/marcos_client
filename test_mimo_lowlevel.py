@@ -10,6 +10,7 @@ import server_comms as sc
 import test_base as tb
 from mimo_devices import mimo_dev_run
 
+import local_config as lc
 
 def plot_single(res, rx_t=3.125, title_str=''):
     """ res: list of result tuples in the format [(rxd_iq, msgs), (rxd_iq, msgs), ...]
@@ -299,8 +300,8 @@ def test_repeated(reps=10, plot_persistent=False,
 
 if __name__ == "__main__":
     test_single_simulation = False
-    test_single_real = False
-    test_repeated_real = True
+    test_single_real = True
+    test_repeated_real = False
 
     ## Check that libraries etc are all correctly configured (just simulation)
     if test_single_simulation:
@@ -309,9 +310,9 @@ if __name__ == "__main__":
     ## Check basic operation and sync
     if test_single_real:
             test_single(rx_gates=10, rx_gate_interval=50e3, rx_gate_len=2,
-                    plot_data=True,
-                    master_ip="192.168.1.160", master_port=11111,
-                    slave_ip="192.168.1.158", slave_port=11111)
+                        plot_data=True,
+                        master_ip=lc.ip_address, master_port=lc.port,
+                        slave_ip=lc.ip_address_slave, slave_port=lc.port_slave)
 
     ## Check repeatability over multiple rounds
     if test_repeated_real:
@@ -319,14 +320,13 @@ if __name__ == "__main__":
         reps = 40
         params_shared = {'reps': reps, 'rx_gates': rx_gates, 'rx_gate_interval': 1e3,
                          'plot_persistent': True,
-                         'master_ip':"192.168.1.160", 'master_port': 11111,
-                         'slave_ip': "192.168.1.158", 'slave_port':11111,
+                         'master_ip': lc.ip_address, 'master_port': lc.port,
+                         'slave_ip': lc.ip_address_slave, 'slave_port':lc.port_slave,
                          'rx_gate_len': 10e3, 'rx_t': 30,
                          'rf_pulse_offset': 0}
 
         params_unsynced = {'trig_timeout': 0, 'trig_output_time': 1}
         params_synced = {'trig_timeout': 100000, 'trig_output_time': 10e3}
-
 
         plt.figure(figsize=(10,7))
         test_repeated(**(params_unsynced | params_shared))

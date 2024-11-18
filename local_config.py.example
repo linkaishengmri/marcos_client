@@ -7,25 +7,20 @@
 ## Master port: always 11111 for now
 port = 11111
 
-## IP addresses of follower SDRLabs, if any; must be in a list
-#
-# ip_addresses_follow = ["192.168.1.190", "192.168.1.191", "192.168.1.192"]
-
-## Ports of follower SDRLabs, if any; must be in a list of the same
-## length as follower IP addresses.
-#
-# ports_follow = [11111, 11111, 11111]
+## IP address of slave SDRLab
+# ip_address_slave = "192.168.1.180"
+# port_slave = 11111
 
 ## FPGA clock frequency of master: uncomment one of the below to configure various
 ## system behaviour. Right now only 122.88 is supported.
 ##
-## Clocks of followers are assumed to be in phase with master clock.
+## Clocks of slaves are assumed to be in phase with master clock.
 #
 #fpga_clk_freq_MHz = 122.88 # RP-122
 #fpga_clk_freq_MHz = 125.0 # RP-125
 
 ## Gradient board: uncomment one of the below to configure the
-## gradient data format.  Note that gradient boards run by followers
+## gradient data format.  Note that gradient boards run by slaves
 ## are assumed to be the same as the master's gradient board;
 ## different gradient boards are unsupported for now.
 #
