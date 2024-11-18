@@ -8,11 +8,11 @@ import multiprocessing as mp
 from device import Device
 import server_comms as sc
 import test_base as tb
-from mimo_device import mimo_dev_run
+from mimo_devices import mimo_dev_run
 
 
-def plot_single(res, rx_t, title_str=''):
-    """ res: result dict from Device
+def plot_single(res, rx_t=3.125, title_str=''):
+    """ res: list of result tuples in the format [(rxd_iq, msgs), (rxd_iq, msgs), ...]
     rx_t: sampling time used
     title_str: title string to stick at top of plot
     """
@@ -75,8 +75,8 @@ def plot_single(res, rx_t, title_str=''):
 
     plt.show()
 
-def plot_repeated(resl, rx_t):
-    """ resl: list of (result, msgs) tuples
+def plot_repeated(resl, rx_t=3.125):
+    """ resl: list of (rxd_iq, msgs) tuples
     rx_t: RX sampling time used"""
     for res in resl:
         rxdm, rxds = res[0][0], res[1][0]
