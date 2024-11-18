@@ -269,7 +269,7 @@ def test_single(rx_gates=10, rx_gate_interval=1000e3, plot_data=False,
     return test_mimo_lowlevel(rx_gates=rx_gates,
                               rx_gate_interval=rx_gate_interval,
                               trig_timeout=trig_timeout,
-                              plot_preview=False, plot_data=plot_data, **kwargs)
+                              plot_data=plot_data, **kwargs)
 
 
 def test_repeated(reps=10, plot_persistent=False,
@@ -310,7 +310,8 @@ if __name__ == "__main__":
     ## Check basic operation and sync
     if test_single_real:
             test_single(rx_gates=10, rx_gate_interval=50e3, rx_gate_len=2,
-                        plot_data=True,
+                        slave_trig_latency=6.079,
+                        plot_data=True, plot_preview=False,
                         master_ip=lc.ip_address, master_port=lc.port,
                         slave_ip=lc.ip_address_slave, slave_port=lc.port_slave)
 
