@@ -26,8 +26,8 @@ class MimoDevice:
     """Manages multiple Devices, collates/distributes settings between them and
     handles messages and warnings."""
 
-    def __init__(self, ips, ports, trig_output_time=0, trig_latency=6.08,
-                 trig_timeout=136533, master_run_delay=0, custom_args=None, **kwargs):
+    def __init__(self, ips, ports, trig_output_time=10e3, slave_trig_latency=6.079,
+                 trig_timeout=136533, master_run_delay=0, extra_args=None, **kwargs):
         """ips: list of device IPs, master first
 
         ports: list of device ports, master first
@@ -51,7 +51,8 @@ class MimoDevice:
         run() call, negative values will delay the slaves. [TODO: Also accepts a
         per-device list.]
 
-        extra_args: list of dictionaries of extra arguments to each Device object, master first
+        extra_args: list of dictionaries of extra arguments to each Device
+        object, master first
 
         All remaining arguments supported by the Device class are also
         supported, and will be passed down to each Device.
@@ -67,38 +68,60 @@ class MimoDevice:
         else:
             device_args = list(ea | kwargs for ea in extra_args)
 
-        master_delay = 0
-        slave_delay = 0
+        master_rd = 0
+        slave_rd = 0
         if master_run_delay > 0:
             master_rd = master_run_delay
         else:
             slave_rd = -master_run_delay
 
         self._devs = []
-        self._run_delays = []
+        self._pool_args = []
 
         for k, (ip, port, devargs) in enumerate(zip(ips, ports, device_args)):
             if k == 0:
-                # TODO cannot handle the case where the MIMO system is externally triggered
-                devargs['trig_timeout'] = 0
-                self._run_delays.append(master_rd)
+                # TODO cannot yet handle the case where the MIMO system is externally triggered
+                kwargs = devargs | {
+                    'master': True,
+                    'trig_timeout': 0,
+                    'trig_output_time': trig_output_time }
+                run_delay = master_rd
             else:
-                devargs['trig_timeout'] = trig_timeout
-                self._run_delays.append(slave_rd)
+                kwargs = devargs | {
+                    'trig_timeout': trig_timeout
+                }
+                run_delay = slave_rd
 
             dev = Device(
-                ip_address=ip, port=port, **devargs)
+                ip_address=ip, port=port, **kwargs)
 
             self._devs.append(dev)
+            self._pool_args.append((dev, run_delay))
 
     def get_device(self, k):
         return self._devs[k]
 
+    def dev_list(self):
+        return self._devs
+
     def run(self):
         """ Runs the Devices in parallel, collates their results and settings """
-        delays = np.zeros_like(self._devs)
-        delays[0] = self._mrd
         with mp.Pool(len(self._devs)) as p:
-            res = p.map(mimo_dev_run, zip(self._devs, delays))
+            res = p.map(mimo_dev_run, self._pool_args)
 
         return res
+
+def test_mimo_device():
+    ips = ['192.168.1.160', '192.168.1.158']
+    ports = [11111, 11111]
+
+
+
+    extra_args = [
+        {'prev_socket': ms}, {'prev_socket': ss}
+    ]
+
+    mdev = MimoDevice(ips=ips, ports=ports)
+
+if __name__ == "__main__":
+    test_mimo_device()
