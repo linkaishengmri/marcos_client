@@ -26,44 +26,68 @@ class MimoDevice:
     """Manages multiple Devices, collates/distributes settings between them and
     handles messages and warnings."""
 
-    def __init__(self, ips, ports, shared_args, individual_args=None,
-                 master_offset_time=0, master_run_delay=1, trig_wait_time=16e6):
+    def __init__(self, ips, ports, trig_output_time=0, trig_latency=6.08,
+                 trig_timeout=136533, master_run_delay=0, custom_args=None, **kwargs):
         """ips: list of device IPs, master first
 
         ports: list of device ports, master first
 
-        shared_args: dict of shared arguments
+        trig_output_time: usec, when to trigger the slaves after beginning the
+        sequence on the master
 
-        individual_args: list of dicts with individual device arguments, master first
+        trig_latency: usec, how long the slaves take from being triggered by the
+        master to beginning their sequences (plus any additional I/O or cable
+        latencies)
 
-        master_offset_time: usec, offset to apply to all events on the master, to
-        synchronise them to the slaves (since the master produces a trigger and
-        the slaves await it, their events will be slightly delayed without a
-        slight offset)
+        trig_timeout: usec, how long should the slaves wait for a trigger until
+        they run their preprogrammed sequences anyway. Same behaviour and
+        limitations as for the Device class. Negative values = infinite timeout
+        so only use this when the system is debugged.
 
-        master_run_delay: sec, how long to wait for the slaves to start running before
-        starting the master programming/execution -- the master must begin after
-        the slaves are awaiting a trigger, otherwise sync will not be maintained
+        master_run_delay: sec, how long to wait for the slaves to start running
+        before starting the master compilation/programming/execution -- the
+        master must begin after the slaves are awaiting a trigger, otherwise
+        sync will not be maintained. Positive values will delay the master's
+        run() call, negative values will delay the slaves. [TODO: Also accepts a
+        per-device list.]
 
-        trig_wait_time: how long should the slaves wait for a trigger until they
-        run their preprogrammed sequences anyway. Same behaviour as for the
-        Device class.
+        extra_args: list of dictionaries of extra arguments to each Device object, master first
+
+        All remaining arguments supported by the Device class are also
+        supported, and will be passed down to each Device.
 
         """
 
-        self._devs = []
-        self._mot = master_offset_time
-        self._mrd = master_run_delay
+        devN = len(ips)
 
-        for k, (ip, port, args) in enumerate(zip(ips, ports, individual_args)):
+        assert (len(ips) == len(ports)) and (len(ports) == len(extra_args)), f"Lengths of ips/ports/extra_args ({len(ips)}/{len(ports)}/{len(extra_args)}) unequal"
+
+        if extra_args is None:
+            device_args = [kwargs] * devN
+        else:
+            device_args = list(ea | kwargs for ea in extra_args)
+
+        master_delay = 0
+        slave_delay = 0
+        if master_run_delay > 0:
+            master_rd = master_run_delay
+        else:
+            slave_rd = -master_run_delay
+
+        self._devs = []
+        self._run_delays = []
+
+        for k, (ip, port, devargs) in enumerate(zip(ips, ports, device_args)):
             if k == 0:
                 # TODO cannot handle the case where the MIMO system is externally triggered
-                twt = 0
+                devargs['trig_timeout'] = 0
+                self._run_delays.append(master_rd)
             else:
-                twt = trig_wait_time
+                devargs['trig_timeout'] = trig_timeout
+                self._run_delays.append(slave_rd)
 
             dev = Device(
-                ip_address=ip, port=port, trig_wait_time=twt, **(shared_args | args))
+                ip_address=ip, port=port, **devargs)
 
             self._devs.append(dev)
 

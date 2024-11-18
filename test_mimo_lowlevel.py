@@ -25,10 +25,12 @@ def test_mimo_lowlevel(master_ip="localhost", master_port=11111,
                        # existing sockets, if available -- necessary for simulation
                        master_sock=None, slave_sock=None,
                        # when to pulse the output trigger after the start of the master sequence
-                       trig_time=100e3,
+                       trig_output_time=100e3,
                        # how long the slave takes from being triggered by the
-                       # master to beginning its sequence
-                       trig_latency = 6.08,
+                       # master to beginning its sequence (encapsulates
+                       # initialisation, startup pulses etc - should be set by
+                       # calibration)
+                       slave_trig_latency = 6.079,
                        # how long the slave should wait to get triggered (cycles
                        # or 256 x cycles, depending on version), -1 = forever or
                        # until FSM is stopped
@@ -81,8 +83,12 @@ def test_mimo_lowlevel(master_ip="localhost", master_port=11111,
         "flush_old_rx": False,
     }
 
+    master_kwargs = {
+        'mimo_master': True, 'trig_output_time': trig_output_time, 'slave_trig_latency': slave_trig_latency
+        }
+
     dev_m = Device(
-        ip_address=master_ip, port=master_port, prev_socket=master_sock, **dev_kwargs
+        ip_address=master_ip, port=master_port, prev_socket=master_sock, **(master_kwargs | dev_kwargs)
     )
     dev_s = Device(
         ip_address=slave_ip,
@@ -130,14 +136,14 @@ def test_mimo_lowlevel(master_ip="localhost", master_port=11111,
     master_fd = dict(slave_fd)
 
     # 1us trig pulse
-    master_fd["trig_out"] = (np.array([trig_time, trig_time + 1]), np.array([1, 0]))
+    # master_fd["trig_out"] = (np.array([trig_output_time, trig_output_time + 1]), np.array([1, 0]))
 
-    for key in ["tx0", "tx1", "rx0_en", "rx1_en", "tx_gate"]:
-        # shift times by trigger time and trigger latency
-        master_fd[key] = (
-            master_fd[key][0] + trig_time + trig_latency,
-            master_fd[key][1],
-        )
+    # for key in ["tx0", "tx1", "rx0_en", "rx1_en", "tx_gate"]:
+    #     # shift times by trigger time and trigger latency
+    #     master_fd[key] = (
+    #         master_fd[key][0] + trig_output_time + slave_trig_latency,
+    #         master_fd[key][1],
+    #     )
 
     dev_m.add_flodict(master_fd)
     dev_s.add_flodict(slave_fd)
@@ -235,7 +241,7 @@ def test_single_sim(plot_data=False):
     test_mimo_lowlevel(master_ip="localhost", master_port=11111,
                        slave_ip="localhost", slave_port=11112,
                        master_sock=sm, slave_sock=ss,
-                       trig_time=1,
+                       trig_output_time=1,
                        rx_gates=100,
                        rx_gate_interval=0.1,
                        plot_preview=False, plot_data=plot_data)
@@ -302,7 +308,8 @@ def test_repeated(reps=10, plot_persistent=False,
 
 if __name__ == "__main__":
     test_single_simulation = False
-    test_single_real = True
+    test_single_real = False
+    test_single_real_latency = True
     test_repeated_real = False
 
     ## Check that libraries etc are all correctly configured (just simulation)
@@ -316,6 +323,13 @@ if __name__ == "__main__":
                     master_ip="192.168.1.160", master_port=11111,
                     slave_ip="192.168.1.158", slave_port=11111)
 
+    ## Check basic operation and sync
+    if test_single_real_latency:
+            test_single(rx_gates=10, rx_gate_interval=50e3, rx_gate_len=0.5,
+                        plot_data=True,
+                        master_ip="192.168.1.160", master_port=11111,
+                        slave_ip="192.168.1.158", slave_port=11111)
+
     ## Check repeatability over multiple rounds
     if test_repeated_real:
         rx_gates = 5
@@ -327,8 +341,8 @@ if __name__ == "__main__":
                          'rx_gate_len': 10e3, 'rx_t': 30,
                          'rf_pulse_offset': 0}
 
-        params_unsynced = {'trig_timeout': 0, 'trig_time': 1}
-        params_synced = {'trig_timeout': 100000, 'trig_time': 10e3}
+        params_unsynced = {'trig_timeout': 0, 'trig_output_time': 1}
+        params_synced = {'trig_timeout': 100000, 'trig_output_time': 10e3}
 
 
         plt.figure(figsize=(10,7))

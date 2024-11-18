@@ -78,7 +78,10 @@ class Device:
         init_gpa=False,  # initialise the GPA (will reset its outputs when the Device object is created)
         initial_wait=None,  # initial pause before experiment begins - required to configure the LOs and RX rate; must be at least a few us. Is suitably set based on grad_max_update_rate by default.
         auto_leds=True,  # automatically scan the LED pattern from 0 to 255 as the sequence runs (set to off if you wish to manually control the LEDs)
-        trig_timeout=0,  # nonzero values will add a wait-for-trigger instruction to the start of the sequence, with a timeout in microseconds. Positive values must be below 136533 (0.13sec), which is the current limit of marga. Negative values will lead to an infinite wait (i.e. never timing out, blocking forever until a trigger arrives.)
+        mimo_master=False,  # if MIMO master, add a trigger pulse to trig_out channel
+        trig_output_time=0, # usec, when should the master's trig_out pulse occur
+        slave_trig_latency=6.08,  # usec, how much to delay MIMO master events after the trigger is sent to slaves. Only used for MIMO masters, MIMO slaves or standalone devices unaffected. Device, trigger method and cable-specific.
+        trig_timeout=0,  # if MIMO slave or externally-triggered master, nonzero values will add a wait-for-trigger instruction to the start of the sequence, with a timeout in microseconds. Positive values must be below 136533 (0.13sec), which is the current limit of marga. Negative values will lead to an infinite wait (i.e. never timing out, blocking forever until a trigger arrives.)
         prev_socket=None,  # previously-opened socket, if want to maintain status, running a simulation, etc
         fix_cic_scale=True,  # scale the RX data precisely based on the rate being used; otherwise a 2x variation possible in data amplitude based on rate
         set_cic_shift=False,  # program the CIC internal bit shift to maintain the gain within a factor of 2 independent of rate; required if the open-source CIC is used in the design
@@ -128,6 +131,15 @@ class Device:
             self._initial_wait = 1 + 1 / grad_max_update_rate
 
         self._auto_leds = auto_leds
+
+        self._mimo_master = mimo_master
+        if self._mimo_master:
+            self._trig_output_time = trig_output_time
+            self._slave_trig_latency = slave_trig_latency
+        else:
+            self._trig_output_time = 0
+            self._slave_trig_latency = 0
+
         self._trig_wait_time = np.round(trig_timeout * fpga_clk_freq_MHz).astype(np.uint32)
 
         assert (seq_csv is None) or (
@@ -196,6 +208,14 @@ class Device:
             # negative values will get rejected at a later stage
             return np.round(self._fpga_clk_freq_MHz * farr).astype(np.int64)
 
+        # TODO: alter calculation later to use these integer offsets, to avoid floating-point addition
+        initial_wait_b = times_us(self._initial_wait)
+        grad_latency_b = times_us(self._grad_latency)
+        gpa_fhdo_offset_time_b = times_us(self._gpa_fhdo_offset_time)
+
+        # TODO add initial_wait_b to this, so that it doesn't need to occur later
+        master_offset_b = times_us(self._trig_output_time + self._slave_trig_latency)
+
         def tx_real(farr):
             """farr: float array, [-1, 1]"""
             return np.round(32767 * farr).astype(np.uint16)
@@ -210,8 +230,8 @@ class Device:
             # unique = lambda k: np.ones_like(k, dtype=bool)
             idata_u, qdata_u = unique(idata), unique(qdata)
             tbins = (
-                times_us(times[idata_u] + self._initial_wait),
-                times_us(times[qdata_u] + self._initial_wait),
+                times_us(times[idata_u] + self._initial_wait) + master_offset_b,
+                times_us(times[qdata_u] + self._initial_wait) + master_offset_b,
             )
             txbins = (tx_real(idata[idata_u]), tx_real(qdata[qdata_u]))
             return tbins, txbins
@@ -248,17 +268,11 @@ class Device:
                 # user the illusion of being able to output on several
                 # channels in parallel
                 if self._gpa_fhdo_offset_time:
-                    tbin = (
-                        times_us(
-                            times
-                            + channel * self._gpa_fhdo_offset_time
-                            + self._initial_wait
-                            - self._grad_latency
-                        ),
-                    )
+                    # TODO the floating-point additions here are unfavourable, should pre-calculate per-channel offsets!
+                    tbin = (times_us(times + self.initial_wait) + channel * gpa_fhdo_offset_time_b - grad_latency_b + master_offset_b,)
                 else:
                     # compensate latency
-                    tbin = (times_us(times + self._initial_wait - self._grad_latency),)
+                    tbin = (times_us(times + self._initial_wait) - grad_latency_b + master_offset_b,) # + initial_wait_b - grad_latency_b,)
 
             elif key in ["rx0_rate", "rx1_rate"]:
                 keybin = (key,)
@@ -295,7 +309,7 @@ class Device:
 
             # default tbin
             if tbin is None:
-                tbin = (times_us(times + self._initial_wait),)
+                tbin = (times_us(times + self._initial_wait) + master_offset_b,)
 
             for t, k, v in zip(tbin, keybin, valbin):
                 intdict[k] = (t, v)
@@ -381,6 +395,12 @@ class Device:
             initial_cfg.update(
                 {"rx1_lo": (np.array([tstart]), np.array([self._rx_lo[1]]))}
             )
+
+        # Automatic trigger pulse if master
+        if self._mimo_master:
+            # trigger has to occur before the slave trigger latency is applied
+            # to all the regular channels during compilation
+            self.add_flodict({'trig_out': (np.array([-self._slave_trig_latency, -self._slave_trig_latency + 1]), np.array([1, 0]))})
 
         # Automatic LED scan
         if self._auto_leds:
