@@ -165,7 +165,7 @@ def test_mimo_devices(single=True):
             res = mdev.run()
             resl.append(res)
 
-        plot_repeated(resl, rx_t)
+        plot_repeated(resl, rx_t, cross_only=True)
 
     plt.show()
     # Only necessary if the socket isn't being closed anyway

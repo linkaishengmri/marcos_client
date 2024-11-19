@@ -76,27 +76,45 @@ def plot_single(res, rx_t=3.125, title_str=''):
 
     plt.show()
 
-def plot_repeated(resl, rx_t=3.125):
+def plot_repeated(resl, rx_t=3.125, cross_only=True):
     """ resl: list of (rxd_iq, msgs) tuples
     rx_t: RX sampling time used"""
     for res in resl:
         rxdm, rxds = res[0][0], res[1][0]
-        plt.subplot(211)
+        if cross_only:
+            plt.subplot(211)
+        else:
+            plt.subplot(222)
+            xaxis = np.linspace(0, len(rxdm['rx1']) * rx_t, len(rxdm['rx1']))
+            plt.plot(xaxis, np.real(rxdm["rx1"]), 'b', alpha=0.1, label='real')
+            plt.plot(xaxis, np.imag(rxdm['rx1']), 'r', alpha=0.1, label='imag')
+            plt.xlabel('RX time (us)')
+            plt.ylabel("Master RX1")
+            plt.legend(['real', 'imag'])
+            plt.subplot(221)
         xaxis = np.linspace(0, len(rxdm['rx0']) * rx_t, len(rxdm['rx0']))
         plt.plot(xaxis, np.real(rxdm["rx0"]), 'b', alpha=0.1, label='real')
         plt.plot(xaxis, np.imag(rxdm['rx0']), 'r', alpha=0.1, label='imag')
         plt.xlabel('RX time (us)')
         plt.ylabel("Master RX0")
         plt.legend(['real', 'imag'])
-        # plt.grid(True)
-        plt.subplot(212)
+        if cross_only:
+            plt.subplot(212)
+        else:
+            plt.subplot(223)
+            xaxis = np.linspace(0, len(rxds['rx0']) * rx_t, len(rxds['rx0']))
+            plt.plot(xaxis, np.real(rxds["rx0"]), 'b', alpha=0.1, label='real')
+            plt.plot(xaxis, np.imag(rxds["rx0"]), 'r', alpha=0.1, label='imag')
+            plt.xlabel('RX time (us)')
+            plt.ylabel("Slave RX0")
+            plt.legend(['real', 'imag'])
+            plt.subplot(224)
         xaxis = np.linspace(0, len(rxds['rx1']) * rx_t, len(rxds['rx1']))
         plt.plot(xaxis, np.real(rxds["rx1"]), 'b', alpha=0.1, label='real')
         plt.plot(xaxis, np.imag(rxds["rx1"]), 'r', alpha=0.1, label='imag')
         plt.xlabel('RX time (us)')
         plt.ylabel("Slave RX1")
         plt.legend(['real', 'imag'])
-        # plt.grid(True)
 
 
 def test_mimo_lowlevel(master_ip="localhost", master_port=11111,
