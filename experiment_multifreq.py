@@ -138,8 +138,9 @@ if __name__ == "__main__":
         expt = ExperimentMultiFreq(lo_freq=10.36, rx_t=3.125, allow_user_init_cfg=True)
         expt.add_flodict({"rx0_en": (np.array([200, 400, 1200, 1400]), np.array([1, 0, 1, 0]))})
         expt.add_flodict( {"tx0": (np.array([ 50, 130, 1000050,1130000]), np.array([ 0.5, 0,0.5, 0]))})
+        # you can use either lo0_freq (to set frequency directly) or l00_freq_offset (to set frequency offset relative to the init lo_freq frequency)
         # expt.add_flodict( {"lo0_freq": (np.array([1000]), np.array([10.37]))})
-        expt.add_flodict( {"lo0_freq_offset": (np.array([1000000]), np.array([-5.01]))}) # offset is 0.01MHz
+        expt.add_flodict( {"lo0_freq_offset": (np.array([1000000]), np.array([-0.01]))}) # offset is 0.01MHz
         expt.add_flodict( {"lo0_rst": (np.array([10000,1000000+1/fpga_clk_freq_MHz]), np.array([1, 0]))})
         
         # expt.plot_sequence()
