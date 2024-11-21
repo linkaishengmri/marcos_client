@@ -109,7 +109,7 @@ class ExperimentMultiFreq(Experiment):
                 keybin = key,
                 valbin = vals.astype(np.int32),
             elif key in ['lo0_freq', 'lo1_freq', 'lo2_freq']:
-                if np.issubdtype(vals.dtype, np.floating):
+                if np.issubdtype(vals.dtype, np.floating) or np.issubdtype(vals.dtype, np.integer) :
                     valbin = lo_real(vals),
                     keybin = key,
                 else: 
