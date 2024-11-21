@@ -116,7 +116,7 @@ class ExperimentMultiFreq(Experiment):
                     assert False, f"The lo_freq is not a np.floating type."# Phase offset setting is not available so far.
             elif key in ['lo0_freq_offset', 'lo1_freq_offset', 'lo2_freq_offset']:
                 lo_index = int(key[2]) 
-                if np.issubdtype(vals.dtype, np.floating):
+                if np.issubdtype(vals.dtype, np.floating) or np.issubdtype(vals.dtype, np.integer):
                     valbin = lo_real(vals+self._lo_freqs[lo_index]),
                     keybin = key[0:8],
                 else: 
