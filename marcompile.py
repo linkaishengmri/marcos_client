@@ -87,7 +87,12 @@ def col2buf(col_idx, value):
         bit_idx = (col_idx - 31) * 2
         val = value << bit_idx,
         mask = 0x0003 << bit_idx,
-
+    elif col_idx in (33, 34, 35): # dds phase setting
+        buf_idx = 15, 
+        bit_idx = col_idx - 33 
+        val = value << (bit_idx + 3),
+        mask = 0x1 << bit_idx,
+    
     return np.uint16(buf_idx), np.uint16(val), np.uint16(mask)
 
 def csv2bin(path, quick_start=False, initial_bufs=np.zeros(MARGA_BUFS, dtype=np.uint16), latencies = np.zeros(MARGA_BUFS, dtype=np.int32)):
@@ -153,8 +158,8 @@ def dict2bin(sd, initial_bufs=np.zeros(MARGA_BUFS, dtype=np.uint16), latencies =
                'rx0_rate_valid', 'rx1_rate_valid', 'rx0_rst_n', 'rx1_rst_n', 'rx0_en', 'rx1_en',
                'tx_gate', 'rx_gate', 'trig_out', 'leds',
                'lo0_freq', 'lo1_freq', 'lo2_freq', 'lo0_rst', 'lo1_rst', 'lo2_rst',
-               'rx0_lo', 'rx1_lo', ] # TODO: these two rows aren't yet in the CSV and thus aren't tested by test_marga_model.py
-
+               'rx0_lo', 'rx1_lo', # TODO: these two rows aren't yet in the CSV and thus aren't tested by test_marga_model.py
+               'lo0_phase_rst', 'lo1_phase_rst', 'lo2_phase_rst'] 
     changelist = []
     changelist_grad = []
 
