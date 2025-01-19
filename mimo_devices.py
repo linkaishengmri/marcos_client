@@ -118,7 +118,7 @@ class MimoDevices:
         return res
 
 
-def test_mimo_devices(single=True):
+def test_mimo_devices(single=True, reps=1, **kwargs):
     # importing here to avoid a circular import - these are just throwaway plotting functions
     from test_mimo_lowlevel import plot_single, plot_repeated
 
@@ -143,7 +143,7 @@ def test_mimo_devices(single=True):
     # How to do global arguments (shared for every device)
     rx_t = 1
 
-    mdev = MimoDevices(ips=ips, ports=ports, extra_args=extra_args, rx_t=rx_t)
+    mdev = MimoDevices(ips=ips, ports=ports, extra_args=extra_args, rx_t=rx_t, **kwargs)
     devs = mdev.dev_list()
 
     for dev in devs:
@@ -157,9 +157,9 @@ def test_mimo_devices(single=True):
     if single:
         res = mdev.run()
         plot_single(res, rx_t)
+        assert reps == 1, "reps must be 1 for single test"
     else:
         resl = []
-        reps = 100
         for k in range(reps):
             print(f"Round {k+1}")
             res = mdev.run()
@@ -173,4 +173,11 @@ def test_mimo_devices(single=True):
 
 
 if __name__ == "__main__":
-    test_mimo_devices(single=False)
+    ## Single test
+    # test_mimo_devices(single=True)
+
+    ## 100x repetitions, default trig output time, default trig timeout
+    test_mimo_devices(single=False, reps=100)
+
+    ## 5x repetitions, 1-second trig output time, infinite trig timeout
+    # test_mimo_devices(single=False, reps=5, trig_output_time=1e6, trig_timeout=-1)

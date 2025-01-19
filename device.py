@@ -140,7 +140,10 @@ class Device:
             self._trig_output_time = 0
             self._slave_trig_latency = 0
 
-        self._trig_wait_time = np.round(trig_timeout * fpga_clk_freq_MHz).astype(np.uint32)
+        if trig_timeout < 0:
+            self._trig_wait_time = np.int32(-1)
+        else:
+            self._trig_wait_time = np.round(trig_timeout * fpga_clk_freq_MHz).astype(np.uint32)
 
         assert (seq_csv is None) or (
             seq_dict is None
