@@ -103,13 +103,20 @@ class OCRA1:
                 trials -= 1 # try again
 
     def init_hw(self):
+        # init_words = [
+        #     # lower 24 bits sent to ocra1, upper 8 bits used to control ocra1 serialiser channel + broadcast
+        #     0x00400004, 0x02400004, 0x04400004, 0x07400004, # reset DACs to power-on values
+        #     0x00200002, 0x02200002, 0x04200002, 0x07200002, # set internal amplifier
+        #     0x00100000, 0x02100000, 0x04100000, 0x07100000, # set outputs to 0
+        # ]
         init_words = [
             # lower 24 bits sent to ocra1, upper 8 bits used to control ocra1 serialiser channel + broadcast
             0x00400004, 0x02400004, 0x04400004, 0x07400004, # reset DACs to power-on values
-            0x00200002, 0x02200002, 0x04200002, 0x07200002, # set internal amplifier
+            0x00200006, 0x02200006, 0x04200006, 0x07200006, # set internal amplifier, and set DAC output clamp to gnd (disable DAC)
+            0x00100000, 0x02100000, 0x04100000, 0x07100000, # set reg value to 0
+            0x00200002, 0x02200002, 0x04200002, 0x07200002, # set internal amplifier, and enable DAC
             0x00100000, 0x02100000, 0x04100000, 0x07100000, # set outputs to 0
         ]
-
         # configure main grad ctrl word first, in particular switch it to update the serialiser strobe only in response to LSB changes;
         # strobe the reset of the core just in case
         # (marga buffer address = 0, 8 MSBs of the 32-bit word)
