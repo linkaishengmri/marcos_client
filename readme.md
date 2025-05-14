@@ -8,7 +8,16 @@ The original `experiment.py` lacked support for multi-frequency configurations, 
 
 The FPGA backend supports dynamic updates to frequency (`lo0_freq`, `lo1_freq`, `lo2_freq`) and resets (`lo0_rst`, `lo1_rst`, `lo2_rst`) at specific sequence nodes. To leverage this capability, this fork introduces a new file, `experiment_multifreq.py`, which includes:  
 - A reimplementation of the `flo2int()` functions, enabling frequency adjustments during sequence execution.  
-- Enhanced support for complex multi-slice MRI acquisitions.  
+- Enhanced support for complex multi-slice MRI acquisitions.
+
+## Gradient Board Initialization Improvement
+
+In earlier versions, when initializing the gradient board (OCRA1), the firmware would immediately enable the DAC output right after a RESET. This sequence caused the AD5781 DAC to output a transient -10V voltage after RESET, which could lead to saturation or abnormal behavior in the gradient amplifier module until a zero value was explicitly written to the DAC register.
+
+In this update, the initialization process has been refined:
+- After a RESET, the DAC output is kept disabled.
+- Only after writing a zero value to the DAC register is the output enabled.
+- This ensures the output voltage remains at 0V, effectively preventing transient spikes and avoiding potential damage or malfunction of the gradient amplification system.
 
 ## Setup Guide  
 
@@ -22,7 +31,10 @@ The FPGA backend supports dynamic updates to frequency (`lo0_freq`, `lo1_freq`, 
 ## File Descriptions  
 
 ### Added  
-- `experiment_multifreq.py`: New API for handling multi-frequency settings in MRI experiments.  
+- `experiment_multifreq.py`: New API for handling multi-frequency settings in MRI experiments.
+### Modified
+- `grad_board.py`: Includes improved DAC initialization sequence to avoid transient output errors.
+
 
 ### Original Files  
 - `csvs/`: CSV files for `test_flocra_model.py`.  
