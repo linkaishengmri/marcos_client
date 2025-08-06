@@ -318,8 +318,8 @@ def test_repeated(reps=10, plot_persistent=False,
 
 if __name__ == "__main__":
     test_single_simulation = False
-    test_single_real = True
-    test_repeated_real = False
+    test_single_real = False
+    test_repeated_real = True
 
     ## Check that libraries etc are all correctly configured (just simulation)
     if test_single_simulation:
@@ -336,7 +336,7 @@ if __name__ == "__main__":
     ## Check repeatability over multiple rounds
     if test_repeated_real:
         rx_gates = 5
-        reps = 40
+        reps = 10
         params_shared = {'reps': reps, 'rx_gates': rx_gates, 'rx_gate_interval': 1e3,
                          'plot_persistent': True,
                          'master_ip': lc.ip_address, 'master_port': lc.port,
@@ -344,11 +344,11 @@ if __name__ == "__main__":
                          'rx_gate_len': 10e3, 'rx_t': 30,
                          'rf_pulse_offset': 0}
 
-        params_unsynced = {'trig_timeout': 0, 'trig_output_time': 1}
-        params_synced = {'trig_timeout': 100000, 'trig_output_time': 10e3}
+        # params_unsynced = {'trig_timeout': 0, 'trig_output_time': 1}
+        params_synced = {'trig_timeout': -1, 'trig_output_time': 1000e3}
 
-        plt.figure(figsize=(10,7))
-        test_repeated(**(params_unsynced | params_shared))
+        # plt.figure(figsize=(10,7))
+        # test_repeated(**(params_unsynced | params_shared))
 
         plt.figure(figsize=(10,7))
         test_repeated(**(params_synced | params_shared))
