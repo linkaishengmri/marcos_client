@@ -85,7 +85,7 @@ class Device:
         prev_socket=None,  # previously-opened socket, if want to maintain status, running a simulation, etc
         fix_cic_scale=True,  # scale the RX data precisely based on the rate being used; otherwise a 2x variation possible in data amplitude based on rate
         set_cic_shift=False,  # program the CIC internal bit shift to maintain the gain within a factor of 2 independent of rate; required if the open-source CIC is used in the design
-        allow_user_init_cfg=False,  # allow user-defined alteration of marga configuration set by init, namely RX rate, LO properties etc; see the compile() method for details
+        allow_user_init_cfg=True,  # allow user-defined alteration of marga configuration set by init, namely RX rate, LO properties etc; see the compile() method for details
         halt_and_reset=False,  # upon connecting to the server, halt any existing sequences that may be running
         flush_old_rx=False,  # when debugging or developing new code, you may accidentally fill up the RX FIFOs - they will not automatically be cleared in case there is important data inside. Setting this true will always read them out and clear them before running a sequence. More advanced manual code can read RX from existing sequences.
     ):
@@ -306,6 +306,18 @@ class Device:
                 valbin = (
                     np.round(2**31 / self._fpga_clk_freq_MHz * vals).astype(np.uint32),
                 )
+            elif key in ['lo0_freq_offset', 'lo1_freq_offset', 'lo2_freq_offset']:
+                lo_index = int(key[2])  
+                if np.issubdtype(vals.dtype, np.floating) or np.issubdtype(vals.dtype, np.integer):
+                    valbin = (
+                        np.round(2**31 / self._fpga_clk_freq_MHz * (vals + self._lo_freqs[lo_index])).astype(np.uint32),
+                    )
+                    keybin = (key[:8],)  # 'lo0_freq'
+                else:
+                    raise TypeError(f"The lo_freq_offset value must be float or int, got {vals.dtype}")
+            elif key in ['lo0_rst', 'lo1_rst', 'lo2_rst']:
+                keybin = (key,)
+                valbin = (vals.astype(np.int32),)
             else:
                 warnings.warn("Unknown marga experiment dictionary key: " + key)
                 continue
