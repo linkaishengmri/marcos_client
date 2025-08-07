@@ -82,7 +82,7 @@ class Device:
         trig_output_time=0, # usec, when should the master's trig_out pulse occur
         slave_trig_latency=6.079,  # usec, how much to delay MIMO master events after the trigger is sent to slaves. Only used for MIMO masters, MIMO slaves or standalone devices unaffected. Device, trigger method and cable-specific.
         trig_timeout=0,  # if MIMO slave or externally-triggered master, nonzero values will add a wait-for-trigger instruction to the start of the sequence, with a timeout in microseconds. Positive values must be below 136533 (0.13sec), which is the current limit of marga. Negative values will lead to an infinite wait (i.e. never timing out, blocking forever until a trigger arrives.)
-        prev_socket=None,  # previously-opened socket, if want to maintain status, running a simulation, etc
+        prev_socket=False,  # previously-opened socket, if want to maintain status, running a simulation, etc
         fix_cic_scale=True,  # scale the RX data precisely based on the rate being used; otherwise a 2x variation possible in data amplitude based on rate
         set_cic_shift=False,  # program the CIC internal bit shift to maintain the gain within a factor of 2 independent of rate; required if the open-source CIC is used in the design
         allow_user_init_cfg=True,  # allow user-defined alteration of marga configuration set by init, namely RX rate, LO properties etc; see the compile() method for details
