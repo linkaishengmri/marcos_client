@@ -19,6 +19,8 @@ def mimo_dev_run(devt):
     """Allows the parallelisation of Device run() calls, which is essential
     since the slaves will block otherwise."""
     dev, delay = devt
+    if dev._seq is None:
+        return {}, {'warning': 'No sequence execution elements, sequence not executed'}
     time.sleep(delay)
     rxd, msgs = dev.run()
     return rxd, msgs
