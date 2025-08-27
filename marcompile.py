@@ -9,6 +9,29 @@ try:
 except ModuleNotFoundError:
     grad_board = "gpa-fhdo"
 
+# USE_BDATA_FAST mode:
+# 0: keep original marcompile; 1: use bdata_fast to generate instruction events with tick;
+# 2: ompare the results diff based on mode 1; 3: use bdata_fast without tick
+USE_BDATA_FAST = 1
+
+from bdata_fast import  bdata_fast
+import time, datetime
+_last_tick = None  
+def now_str():
+    return datetime.datetime.now().isoformat(sep=' ', timespec='milliseconds')
+
+def tick(tag):
+    if USE_BDATA_FAST != 0 and USE_BDATA_FAST != 3:
+        global _last_tick
+        t = time.perf_counter()
+        if _last_tick is None:
+            print(f"[{now_str()}] {tag} START")
+        else:
+            dt = t - _last_tick
+            print(f"[{now_str()}] {tag} +{dt:.6f}s")
+        _last_tick = t
+
+
 grad_data_bufs = (1, 2)
 
 max_removed_instructions = 1000
@@ -157,7 +180,7 @@ def dict2bin(sd, initial_bufs=np.zeros(MARGA_BUFS, dtype=np.uint16), latencies =
 
     changelist = []
     changelist_grad = []
-
+    tick("dict2bin.start_changelist_and_gard_generation")
     for k, vals in sd.items(): # iterate over dictionary keys
         col_idx = col_arr.index(k)
         changelist_grad_local = []
@@ -176,7 +199,7 @@ def dict2bin(sd, initial_bufs=np.zeros(MARGA_BUFS, dtype=np.uint16), latencies =
         if len(changelist_grad_local) != 0:
             changelist_grad_local.sort(key=lambda change: change[0])
             changelist_grad += changelist_grad_local
-
+    tick("dict2bin.end_changelist_and_gard_generation")
     return cl2bin(changelist, changelist_grad, initial_bufs)
 
 def cl2bin(changelist, changelist_grad,
@@ -197,6 +220,7 @@ def cl2bin(changelist, changelist_grad,
     sortfn_paired = lambda change: change[0][0]
     changelist_grad_paired.sort(key=sortfn_paired) # sort by time
     changelist_grad = [k for sl in changelist_grad_paired for k in sl] # https://stackabuse.com/python-how-to-flatten-list-of-lists/
+    tick("cl2bin.end_grad_changelist_sorting")
 
     t_last = [0, 0] # no updates have previously happened; [LSB, MSB]
     spi_div = (initial_bufs[0] & 0xfc) >> 2
@@ -241,7 +265,7 @@ def cl2bin(changelist, changelist_grad,
                 # time for GPA-FHDO
                 changelist_grad_shifted.append(c)
         else:
-            if t - t_last[idx] < 24 * (1 + spi_div) + 2: #
+            if t - t_last[idx] < 24 * (1 + spi_div) + 2 and t_last[idx] != 0: #
                 warnings.warn("Gradient updates are too frequent for selected SPI divider. Missed samples are likely!", MarGradWarning)
 
             # if data == grad_vals[idx]: # no actual change to buffer output
@@ -254,9 +278,18 @@ def cl2bin(changelist, changelist_grad,
 
     changelist += changelist_grad_shifted
     changelist.sort(key=sortfn) # sort by time
-
+    tick("cl2bin.end_changelist(integrated)_processing")
     # Track removed instruction events, but only warn when the number exceeds a minimum
     removed_instruction_warnings = []
+
+    if USE_BDATA_FAST and len(changelist) > 20000:
+        _ = bdata_fast(changelist[:1], initial_bufs, MARGA_BUFS, COUNTER_MAX) # run once to compile and cache the function
+        tick("cl2bin.bdata_[fast_compile]")
+        bdata_fast_results = bdata_fast(changelist, initial_bufs, MARGA_BUFS, COUNTER_MAX) # run once to compile and cache the function
+        tick("cl2bin.end_bdata_[fast]_instruction_generation")
+        print("Generated {:d} changelist".format(len(changelist))) 
+        if USE_BDATA_FAST == 1 or USE_BDATA_FAST == 3:
+            return bdata_fast_results
 
     # Process and combine the change list into discrete sets of operations at each time, i.e. an output list
     def cl2ol(changelist):
@@ -302,10 +335,10 @@ def cl2bin(changelist, changelist_grad,
     changes = cl2ol(changelist)
 
     # warn about all the removed instructions if there are more than a maximum number
-    if len(removed_instruction_warnings) > max_removed_instructions:
-        for riw in removed_instruction_warnings:
-            warnings.warn(riw, MarRemovedInstructionWarning)
-        warnings.warn("NOTE: Fewer than {:d} removed-instruction warnings will not be printed -- keep this in mind when searching for the root cause.".format(max_removed_instructions))
+    # if len(removed_instruction_warnings) > max_removed_instructions:
+    #     for riw in removed_instruction_warnings:
+    #         warnings.warn(riw, MarRemovedInstructionWarning)
+    #     warnings.warn("NOTE: Fewer than {:d} removed-instruction warnings will not be printed -- keep this in mind when searching for the root cause.".format(max_removed_instructions))
 
     # Process time offsets
     for ch, ch_prev in zip( reversed(changes[1:]), reversed(changes[:-1]) ):
@@ -325,7 +358,7 @@ def cl2bin(changelist, changelist_grad,
         ch0 = ch[0]
         ch[0] = ch0 - last_time
         last_time = ch0
-
+    # tick("cl2bin.end_time_offset_and_diff_processing")
     # Interpretation of each element of changes list:
     # [time when all instructions for this change will have completed,
     #  buffers that need to be changed,
@@ -334,13 +367,52 @@ def cl2bin(changelist, changelist_grad,
 
     ### Write out instructions
 
+    # Purpose:
+    #  1) Count the number of events (changes) and the number of buffer writes per event (total_buf_writes)
+    #  2) Estimate the number of IWAIT / INOP instructions needed to implement time delays (est_waits, est_nops)
+    #  3) Provide an estimated total instruction count (est_total_inst) to help assess whether instruction generation is a bottleneck
+    #
+    # Only counts/estimates and does not change program behavior, serving as a non-intrusive performance measurement.
+    num_events = len(changes)
+    bufs_per_event = [int(ev[1].size) for ev in changes]   # Number of writes for each event (ev[1] is the buffer index array)
+    total_buf_writes = sum(bufs_per_event)
+
+    # Estimate the number of IWAIT / INOP instructions required for the time gaps (conservative estimate)
+    counter_max = COUNTER_MAX   # from the marmachine module
+    est_waits = 0
+    est_nops = 0
+    for ev in changes:
+        b_instrs = int(ev[1].size)
+        dtime = int(ev[0])
+        excess = dtime - b_instrs
+        ex_tmp = excess
+        # Count how many blocks need to be decomposed into multiple IWAIT instructions
+        while ex_tmp > 2:
+            wait_time = min(ex_tmp, counter_max + 3)
+            est_waits += 1
+            ex_tmp -= wait_time
+        # Remaining short segments (1 or 2 cycles) are represented by INOP; conservatively count the actual number of INOPs used
+        if ex_tmp:
+            # Compute the exact number of INOPs for this event (dtime - b_instrs - total wait_time used)
+            # Note: the while loop above has already subtracted the wait_time part; ex_tmp is the leftover few cycles
+            # The remaining INOP count = (dtime - b_instrs - (excess - ex_tmp))
+            est_nops += (dtime - b_instrs - (excess - ex_tmp))
+
+    # Estimate total instructions (buffer writes + waits + nops + 1 IFINISH)
+    est_total_inst = total_buf_writes + est_waits + est_nops + 1
+
+
     # Write out initial buffer values
-    bdata = []
+    # bdata = []
+    bdata_size = est_total_inst + MARGA_BUFS + 100 # add some margin
+    bdata = np.zeros(bdata_size, dtype=np.uint32)
+    instr_idx = 0
     addr = 0
     states = initial_bufs
     # reversed order, so that grad board is enabled last of all (to avoid spurious initial transfer)
     for k, ib in enumerate(reversed(initial_bufs)):
-        bdata.append(instb(MARGA_BUFS-1-k, k, ib))
+        bdata[instr_idx] = (instb(MARGA_BUFS-1-k, k, ib))
+        instr_idx += 1
 
     last_buf_time_left = np.zeros(MARGA_BUFS, dtype=np.int32)
     buf_time_left = np.zeros(MARGA_BUFS, dtype=np.int32)
@@ -348,7 +420,7 @@ def cl2bin(changelist, changelist_grad,
     debug_print("changes:")
     for k in changes:
         debug_print(k)
-
+    # tick("cl2bin.start_instruction_generation")
     for event in changes:
         b_instrs = event[1].size
         dtime = event[0]
@@ -358,13 +430,15 @@ def cl2bin(changelist, changelist_grad,
         excess_dtime_tmp = excess_dtime
         while excess_dtime_tmp > 2: # delay of 3 or more cycles needed
             wait_time = min(excess_dtime_tmp, COUNTER_MAX + 3) # delay for the time instruction
-            bdata.append(insta(IWAIT, wait_time - 3))
+            bdata[instr_idx] = (insta(IWAIT, wait_time - 3))
+            instr_idx += 1
             excess_dtime_tmp -= wait_time
             debug_print("i wait ", wait_time - 3)
         if excess_dtime_tmp: # final delay of 1 or 2 cycles
             for k in range(dtime - b_instrs):
                 debug_print("i nop")
-                bdata.append(insta(INOP, 0))
+                bdata[instr_idx] = (insta(INOP, 0))
+                instr_idx += 1
 
         # time left after delays from nops or waits
         # dtime_eff could be increased later with a more advanced
@@ -392,12 +466,19 @@ def cl2bin(changelist, changelist_grad,
 
             debug_print("bti={:d} btli={:d} m={:d} empty={:d} edel={:d} instb i {:d} del {:d} dat {:d}".format(
                 buf_time_left[ind], btli, m, buf_empty, execution_delay, ind, extra_delay, dat))
-            bdata.append(instb(ind, extra_delay, dat))
-
+            bdata[instr_idx] = (instb(ind, extra_delay, dat))
+            instr_idx += 1
         buf_time_left -= b_instrs # take into account execution time of this timestep
 
     # Finish sequence
-    bdata.append(insta(IFINISH, 0))
+    bdata[instr_idx] = insta(IFINISH, 0)
+    instr_idx += 1
+    bdata = bdata[:instr_idx] 
+
+    tick("cl2bin.end_bdata_[normal]_instruction_generation")
+    if USE_BDATA_FAST == 2:
+        diff = np.flatnonzero(bdata != bdata_fast_results)
+        print(len(diff), "differences at indices:", diff)   
     return bdata
 
 CIC_SLOWEST_RATE_NEAREST_POW2 = 1 << np.ceil(np.log2(CIC_SLOWEST_RATE)).astype(int)
