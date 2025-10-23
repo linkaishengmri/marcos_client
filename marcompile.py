@@ -100,7 +100,15 @@ def col2buf(col_idx, value):
         bit_idx = (col_idx - 31) * 2
         val = (value << bit_idx,)
         mask = (0x0003 << bit_idx,)
-
+    elif col_idx in (33, 34):  # RX gain control
+        buf_idx = (15,)
+        bit_idx = col_idx - 33 + 3
+        val = (value << bit_idx,)
+        mask = (0x1 << bit_idx,)
+    elif col_idx == 35:  # RX gain register
+        buf_idx = (16,)
+        val = (value << 10,)
+        mask = (0xFC00,)
     return np.uint16(buf_idx), np.uint16(val), np.uint16(mask)
 
 
@@ -193,8 +201,10 @@ def dict2bin(
                'tx_gate', 'rx_gate', 'trig_out', 'leds',
                'lo0_freq', 'lo1_freq', 'lo2_freq', 'lo0_rst', 'lo1_rst', 'lo2_rst',
                 # TODO: these two rows aren't yet in the CSV and thus aren't tested by test_marga_model.py
-               'rx0_lo', 'rx1_lo', ]
-
+               'rx0_lo', 'rx1_lo', 
+               # rx gain control
+               'rxgain_write', 'rxgain_sel', 'rxgain_reg']
+    
     changelist = []
     changelist_grad = []
 

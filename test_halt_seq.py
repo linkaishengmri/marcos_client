@@ -34,6 +34,7 @@ def reset_grad():
         port=lc.port,
         mimo_master=True,
         trig_output_time=1e5,
+        rx_gain={0:100, 1:100,2:100,3:100},
         **(params_shared)
     )
     dev_s = Device(

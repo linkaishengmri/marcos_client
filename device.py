@@ -88,6 +88,7 @@ class Device:
         allow_user_init_cfg=True,  # allow user-defined alteration of marga configuration set by init, namely RX rate, LO properties etc; see the compile() method for details
         halt_and_reset=False,  # upon connecting to the server, halt any existing sequences that may be running
         flush_old_rx=False,  # when debugging or developing new code, you may accidentally fill up the RX FIFOs - they will not automatically be cleared in case there is important data inside. Setting this true will always read them out and clear them before running a sequence. More advanced manual code can read RX from existing sequences.
+        rx_gain={3:0}, # set the RX gain in percent, a dictionary for each channel 
     ):
         self._ip_address = ip_address
         self._port = port
@@ -145,6 +146,7 @@ class Device:
         else:
             self._trig_wait_time = np.round(trig_timeout * fpga_clk_freq_MHz).astype(np.uint32)
 
+        self._rx_gain = rx_gain
         assert (seq_csv is None) or (
             seq_dict is None
         ), "Cannot supply both a sequence dictionary and a CSV file."
@@ -318,6 +320,21 @@ class Device:
             elif key in ['lo0_rst', 'lo1_rst', 'lo2_rst']:
                 keybin = (key,)
                 valbin = (vals.astype(np.int32),)
+            elif key in ['rxgain_sel', 'rxgain_write']:
+                keybin = (key,)
+                # binary-valued data
+                valbin = (vals.astype(np.int32),)
+                for vb in valbin:
+                    assert np.all(
+                        (0 <= vb) & (vb <= 1)
+                    ), "Binary columns must be [0,1] or [False, True] valued"
+                tbin = (times_us(times + self._initial_wait) + 0,)
+            elif key in ['rxgain_reg']:
+                keybin = (key,)
+                valbin = (
+                    np.round(vals).astype(np.uint32),
+                )
+                tbin = (times_us(times + self._initial_wait) + 0,)
             else:
                 warnings.warn("Unknown marga experiment dictionary key: " + key)
                 continue
@@ -373,6 +390,9 @@ class Device:
             "lo0_rst": (np.array([tstart, tstart + 1]), np.array([1, 0])),
             "lo1_rst": (np.array([tstart, tstart + 1]), np.array([1, 0])),
             "lo2_rst": (np.array([tstart, tstart + 1]), np.array([1, 0])),
+            "rxgain_sel": (np.array([tstart, tstart + 1]), np.array([0])),
+            "rxgain_write": (np.array([tstart, tstart + 1]), np.array([0])),
+            "rxgain_reg": (np.array([tstart, tstart + 1]), np.array([0])),
         }
 
         # Set CIC decimation rate and internal shift, if necessary, and calculate CIC scale correction
@@ -417,6 +437,17 @@ class Device:
             # to all the regular channels during compilation
             self.add_flodict({'trig_out': (np.array([-self._slave_trig_latency, -self._slave_trig_latency + 1]), np.array([1, 0]))})
 
+            
+            
+            time_base = tstart + rx_wait
+            rxgain_dict = {
+                'rxgain_sel': [[], []],
+                'rxgain_write': [[], []],
+                'rxgain_reg': [[], []],
+            }
+            rxgain_dict=build_rxgain_dict(rxgain_dict, self._rx_gain, time_base, append=False, fpga_clk_freq_MHz=self._fpga_clk_freq_MHz)
+            self.add_flodict(rxgain_dict)
+            
         # Automatic LED scan
         if self._auto_leds:
             led_steps = 256
@@ -623,6 +654,116 @@ class Device:
             sc.send_packet(
                 sc.construct_packet({}, 0, command=sc.close_server_pkt), self._s
             )
+    
+
+def build_rxgain_dict(rxgain_dict_src: dict, rx_gain: dict, time_base: float, append: bool = True, fpga_clk_freq_MHz: float = 122.88):
+    """
+    Build or extend an RX gain control dictionary.
+
+    Parameters
+    ----------
+    rxgain_dict_src : dict
+        Existing RX gain dictionary in the form:
+        {
+            'rxgain_sel': (np.array(times), np.array(values)),
+            'rxgain_write': (...),
+            'rxgain_reg': (...)
+        }
+    rx_gain : dict
+        Channel-to-gain mapping, e.g. {0: 50.0, 1: 30.0} where values are percentages.
+    time_base : float
+        Starting time in microseconds.
+    append : bool, optional
+        If True, append to rxgain_dict_src; if False, start a new dictionary.
+    fpga_clk_freq_MHz : float, optional
+        FPGA clock frequency in MHz, used to compute timing steps.
+
+    Returns
+    -------
+    dict
+        Updated RX gain dictionary with the same structure as rxgain_dict_src.
+    """
+
+    # Initialize as lists for easier appending
+    if append:
+        # Convert existing tuple(np.array, np.array) to mutable lists
+        rxgain_dict = {
+            k: [list(v[0]), list(v[1])] for k, v in rxgain_dict_src.items()
+        }
+    else:
+        # Start from empty lists
+        rxgain_dict = {
+            'rxgain_sel': [[], []],
+            'rxgain_write': [[], []],
+            'rxgain_reg': [[], []],
+        }
+
+        
+    def percent_to_reg(percent: float) -> int:
+        """
+        Convert output-voltage percentage to a 6-bit RF attenuator code.
+
+        Rules:
+        - 6-bit code, LSB = 0.5 dB, range 0.0 ~ 31.5 dB (code 0 ~ 63).
+        - percent means Vout/Vin in %, e.g. 100 -> 1.0 (0 dB), 50 -> 0.5 (≈6.02 dB).
+        - We quantize to the nearest 0.5 dB and saturate to [0, 63].
+
+        Examples:
+        - percent=100 -> 0 dB -> code 0
+        - percent=50  -> ~6.02 dB -> quantized 6.0 dB -> code 12
+        - percent=0   -> 31.5 dB max -> code 63
+        """
+        # Saturate edges first
+        if percent >= 100.0:
+            return 0
+        if percent <= 0.0:
+            return 63
+
+        # Desired attenuation in dB: A = 20*log10(Vin/Vout) = 20*log10(100/percent)
+        att_db = 20.0 * np.log10(100.0 / float(percent))
+
+        # Quantize to nearest 0.5 dB and clamp to 0..63
+        code = int(round(att_db / 0.5))
+        return max(0, min(63, code))
+    
+    # Iterate over channels and gains
+    for ch, g in rx_gain.items():
+        g_reg = percent_to_reg(g)  # Convert percentage gain to register value
+
+        # --- Step 1: Write the register address ---
+        rxgain_dict['rxgain_sel'][0].append(time_base)
+        rxgain_dict['rxgain_sel'][1].append(1)
+        rxgain_dict['rxgain_reg'][0].append(time_base)
+        rxgain_dict['rxgain_reg'][1].append(ch)
+        time_base += 1 / fpga_clk_freq_MHz
+
+        # --- Step 2: Write the gain value ---
+        rxgain_dict['rxgain_sel'][0].append(time_base)
+        rxgain_dict['rxgain_sel'][1].append(0)
+        rxgain_dict['rxgain_reg'][0].append(time_base)
+        rxgain_dict['rxgain_reg'][1].append(g_reg)
+        time_base += 1 / fpga_clk_freq_MHz
+
+        # --- Step 3: Enable register write ---
+        rxgain_dict['rxgain_write'][0].append(time_base)
+        rxgain_dict['rxgain_write'][1].append(1)
+
+        # Wait for write completion
+        # Required wait time: (DIV / 122.88 * (16+1) * 2) us
+        # Example: DIV=40 → wait ≈ 11.06777 us
+        time_base += 12  # microseconds
+
+        # --- Step 4: Disable register write ---
+        rxgain_dict['rxgain_write'][0].append(time_base)
+        rxgain_dict['rxgain_write'][1].append(0)
+
+    # Convert lists back to tuple(np.array, np.array)
+    rxgain_dict_dst = {
+        k: (np.array(v[0]), np.array(v[1])) for k, v in rxgain_dict.items()
+    }
+
+    return rxgain_dict_dst
+
 
 
 def test_rx_scaling(
