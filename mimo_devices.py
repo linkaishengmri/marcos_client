@@ -114,9 +114,11 @@ class MimoDevices:
 
     def run(self):
         """ Runs the Devices in parallel, collates their results and settings """
-        with mp.Pool(len(self._devs)) as p:
-            res = p.map(mimo_dev_run, self._pool_args)
-
+        if len(self._devs) == 1:
+            res = [mimo_dev_run((self._devs[0], 0))]
+        else:
+            with mp.Pool(len(self._devs)) as p:
+                res = p.map(mimo_dev_run, self._pool_args)
         return res
 
 
