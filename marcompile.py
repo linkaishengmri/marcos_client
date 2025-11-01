@@ -387,12 +387,12 @@ def cl2bin(
     changes = cl2ol(changelist)
 
     # warn about all the removed instructions if there are more than a maximum number
-    if len(removed_instruction_warnings) > max_removed_instructions:
-        for riw in removed_instruction_warnings:
-            warnings.warn(riw, MarRemovedInstructionWarning)
-        warnings.warn(
-            f"NOTE: Fewer than {max_removed_instructions} removed-instruction warnings will not be printed -- keep this in mind when searching for the root cause."
-        )
+    # if len(removed_instruction_warnings) > max_removed_instructions:
+    #     for riw in removed_instruction_warnings:
+    #         warnings.warn(riw, MarRemovedInstructionWarning)
+    #     warnings.warn(
+    #         f"NOTE: Fewer than {max_removed_instructions} removed-instruction warnings will not be printed -- keep this in mind when searching for the root cause."
+    #     )
 
     # Process time offsets
     for ch, ch_prev in zip(reversed(changes[1:]), reversed(changes[:-1])):
