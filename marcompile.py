@@ -11,6 +11,29 @@ try:
 except ModuleNotFoundError:
     grad_board = "gpa-fhdo"
 
+# USE_BDATA_FAST mode:
+# 0: keep original marcompile; 1: use bdata_fast to generate instruction events with tick;
+# 2: ompare the results diff based on mode 1; 3: use bdata_fast without tick
+USE_BDATA_FAST = 1
+
+from bdata_fast import  bdata_fast
+import time, datetime
+_last_tick = None  
+def now_str():
+    return datetime.datetime.now().isoformat(sep=' ', timespec='milliseconds')
+
+def tick(tag):
+    if USE_BDATA_FAST != 0 and USE_BDATA_FAST != 3:
+        global _last_tick
+        t = time.perf_counter()
+        if _last_tick is None:
+            print(f"[{now_str()}] {tag} START")
+        else:
+            dt = t - _last_tick
+            print(f"[{now_str()}] {tag} +{dt:.6f}s")
+        _last_tick = t
+
+
 grad_data_bufs = (1, 2)
 
 max_removed_instructions = 1000
@@ -207,7 +230,7 @@ def dict2bin(
     
     changelist = []
     changelist_grad = []
-
+    tick("dict2bin.start_changelist_and_gard_generation")
     for k, vals in sd.items(): # iterate over dictionary keys
         col_idx = col_arr.index(k)
         changelist_grad_local = []
@@ -226,7 +249,7 @@ def dict2bin(
         if len(changelist_grad_local) != 0:
             changelist_grad_local.sort(key=lambda change: change[0])
             changelist_grad += changelist_grad_local
-
+    # tick("dict2bin.end_changelist_and_gard_generation")
     return cl2bin(changelist, changelist_grad, initial_bufs, trig_wait_time)
 
 
@@ -269,7 +292,7 @@ def cl2bin(
     changelist_grad = [
         k for sl in changelist_grad_paired for k in sl
     ]  # https://stackabuse.com/python-how-to-flatten-list-of-lists/
-
+    # tick("cl2bin.end_grad_changelist_sorting")
     t_last = [0, 0]  # no updates have previously happened; [LSB, MSB]
     spi_div = (initial_bufs[0] & 0xFC) >> 2
     changelist_grad_shifted = []
@@ -334,7 +357,14 @@ def cl2bin(
 
     # Track removed instruction events, but only warn when the number exceeds a minimum
     removed_instruction_warnings = []
-
+    if USE_BDATA_FAST and len(changelist) > 20000:
+        _ = bdata_fast(changelist[:1], initial_bufs, MARGA_BUFS, COUNTER_MAX) # run once to compile and cache the function
+        tick("cl2bin.bdata_[fast_compile]")
+        bdata_fast_results = bdata_fast(changelist, initial_bufs, MARGA_BUFS, COUNTER_MAX) # run once to compile and cache the function
+        tick("cl2bin.end_bdata_[fast]_instruction_generation")
+        print("Generated {:d} changelist".format(len(changelist))) 
+        if USE_BDATA_FAST == 1 or USE_BDATA_FAST == 3:
+            return bdata_fast_results
     # Process and combine the change list into discrete sets of operations at each time, i.e. an output list
     def cl2ol(changelist):
         current_bufs = initial_bufs.copy()
@@ -507,6 +537,10 @@ def cl2bin(
 
     # Finish sequence
     bdata.append(insta(IFINISH, 0))
+    tick("cl2bin.end_bdata_[normal]_instruction_generation")
+    if USE_BDATA_FAST == 2:
+        diff = np.flatnonzero(bdata != bdata_fast_results)
+        print(len(diff), "differences at indices:", diff)   
     return bdata
 
 
