@@ -249,7 +249,7 @@ def dict2bin(
         if len(changelist_grad_local) != 0:
             changelist_grad_local.sort(key=lambda change: change[0])
             changelist_grad += changelist_grad_local
-    # tick("dict2bin.end_changelist_and_gard_generation")
+    tick("dict2bin.end_changelist_and_gard_generation")
     return cl2bin(changelist, changelist_grad, initial_bufs, trig_wait_time)
 
 
@@ -292,7 +292,7 @@ def cl2bin(
     changelist_grad = [
         k for sl in changelist_grad_paired for k in sl
     ]  # https://stackabuse.com/python-how-to-flatten-list-of-lists/
-    # tick("cl2bin.end_grad_changelist_sorting")
+    tick("cl2bin.end_grad_changelist_sorting")
     t_last = [0, 0]  # no updates have previously happened; [LSB, MSB]
     spi_div = (initial_bufs[0] & 0xFC) >> 2
     changelist_grad_shifted = []
@@ -354,7 +354,7 @@ def cl2bin(
 
     changelist += changelist_grad_shifted
     changelist.sort(key=sortfn)  # sort by time
-
+    tick("cl2bin.end_changelist(integrated)_processing")
     # Track removed instruction events, but only warn when the number exceeds a minimum
     removed_instruction_warnings = []
     if USE_BDATA_FAST and len(changelist) > 20000:
