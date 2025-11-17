@@ -12,7 +12,7 @@ except ModuleNotFoundError:
 # USE_BDATA_FAST mode:
 # 0: keep original marcompile; 1: use bdata_fast to generate instruction events with tick;
 # 2: ompare the results diff based on mode 1; 3: use bdata_fast without tick
-USE_BDATA_FAST = 1
+USE_BDATA_FAST = 3
 
 from bdata_fast import  bdata_fast
 import time, datetime
@@ -31,6 +31,15 @@ def tick(tag):
             print(f"[{now_str()}] {tag} +{dt:.6f}s")
         _last_tick = t
 
+def tick_force(tag):
+    global _last_tick
+    t = time.perf_counter()
+    if _last_tick is None:
+        print(f"[{now_str()}] {tag} START")
+    else:
+        dt = t - _last_tick
+        print(f"[{now_str()}] {tag} +{dt:.6f}s")
+    _last_tick = t
 
 grad_data_bufs = (1, 2)
 
@@ -287,7 +296,7 @@ def cl2bin(changelist, changelist_grad,
         tick("cl2bin.bdata_[fast_compile]")
         bdata_fast_results = bdata_fast(changelist, initial_bufs, MARGA_BUFS, COUNTER_MAX) # run once to compile and cache the function
         tick("cl2bin.end_bdata_[fast]_instruction_generation")
-        print("Generated {:d} changelist".format(len(changelist))) 
+        tick_force("Generated {:d} changelist".format(len(changelist))) 
         if USE_BDATA_FAST == 1 or USE_BDATA_FAST == 3:
             return bdata_fast_results
 
@@ -476,6 +485,7 @@ def cl2bin(changelist, changelist_grad,
     bdata = bdata[:instr_idx] 
 
     tick("cl2bin.end_bdata_[normal]_instruction_generation")
+    tick_force("Generated {:d} changelist".format(len(changelist))) 
     if USE_BDATA_FAST == 2:
         diff = np.flatnonzero(bdata != bdata_fast_results)
         print(len(diff), "differences at indices:", diff)   
