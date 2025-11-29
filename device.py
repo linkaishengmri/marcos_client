@@ -89,6 +89,10 @@ class Device:
         halt_and_reset=False,  # upon connecting to the server, halt any existing sequences that may be running
         flush_old_rx=False,  # when debugging or developing new code, you may accidentally fill up the RX FIFOs - they will not automatically be cleared in case there is important data inside. Setting this true will always read them out and clear them before running a sequence. More advanced manual code can read RX from existing sequences.
         rx_gain={3:0}, # set the RX gain in percent, a dictionary for each channel 
+        ena_vib_setting=0, # enable the vibration settings. Only when ena_vib_setting is 1 or 2, the following vibration parameters will be used
+        vib_freqency=1, # Hz, the frequency of the vibration of the DDS, it determines pinc reg. Effective only when ena_vib_setting is 1
+        vib_phase=0.0, # deg, phase of the vibration of the DDS, it determines poff reg. Effective only when ena_vib_setting is 2
+        vib_amplitude=0.0, # Hz, amplitude of the vibration of the DDS, it determines amp reg. Effective only when ena_vib_setting is 2
     ):
         self._ip_address = ip_address
         self._port = port
@@ -173,6 +177,10 @@ class Device:
         self._set_cic_shift = set_cic_shift
         self._flush_old_rx = flush_old_rx
         self._allow_user_init_cfg = allow_user_init_cfg
+        self._ena_vib_setting = ena_vib_setting
+        self._vib_freqency = vib_freqency
+        self._vib_phase = vib_phase
+        self._vib_amplitude = vib_amplitude
 
     def __del__(self):
         if self._close_socket:
@@ -335,6 +343,21 @@ class Device:
                     np.round(vals).astype(np.uint32),
                 )
                 tbin = (times_us(times + self._initial_wait) + 0,)
+            elif key in ['vib_pinc_valid', 'vib_poff_valid', 'vib_rst', 'vib_amp_valid']:
+                keybin = (key,)
+                # binary-valued data
+                valbin = (vals.astype(np.int32),)
+                for vb in valbin:
+                    assert np.all(
+                        (0 <= vb) & (vb <= 1)
+                    ), "Binary columns must be [0,1] or [False, True] valued"
+                tbin = (times_us(times + self._initial_wait) - grad_latency_b + master_offset_b,)
+            elif key in ['vib_reg']:
+                keybin = (key,)
+                valbin = (
+                    np.round(vals).astype(np.uint32),
+                )
+                tbin = (times_us(times + self._initial_wait) - grad_latency_b + master_offset_b,)
             else:
                 warnings.warn("Unknown marga experiment dictionary key: " + key)
                 continue
@@ -380,6 +403,7 @@ class Device:
         # RX and LO configuration
         tstart = 50  # cycles before doing anything
         rx_wait = 50  # cycles to run RX before setting rate, then later resetting again
+        vib_setting_wait = 40
         initial_cfg = {  # 'rx0_rst_n': ( np.array([tstart, tstart + 2*rx_wait]), np.array([1, 0]) ),
             # 'rx1_rst_n': ( np.array([tstart, tstart + 2*rx_wait]), np.array([1, 0]) ),
             "rx0_rst_n": (np.array([tstart]), np.array([1])),
@@ -393,6 +417,11 @@ class Device:
             "rxgain_sel": (np.array([tstart, tstart + 1]), np.array([0])),
             "rxgain_write": (np.array([tstart, tstart + 1]), np.array([0])),
             "rxgain_reg": (np.array([tstart, tstart + 1]), np.array([0])),
+            "vib_reg": (np.array([tstart, tstart + 1]), np.array([0])),
+            "vib_pinc_valid": (np.array([tstart, tstart + 1]), np.array([0])),
+            "vib_poff_valid": (np.array([tstart, tstart + 1]), np.array([0])),
+            "vib_amp_valid": (np.array([tstart, tstart + 1]), np.array([0])),
+            "vib_rst": (np.array([tstart, tstart + 1]), np.array([0])),
         }
 
         # Set CIC decimation rate and internal shift, if necessary, and calculate CIC scale correction
@@ -430,6 +459,21 @@ class Device:
             initial_cfg.update(
                 {"rx1_lo": (np.array([tstart]), np.array([self._rx_lo[1]]))}
             )
+        # vibration reference configuration
+        vib_dict = {
+                'vib_reg': [[], []],
+                'vib_pinc_valid': [[], []],
+                'vib_poff_valid': [[], []],
+                'vib_amp_valid': [[], []],
+                'vib_rst': [[], []],
+            }
+        vib_time_base = tstart + vib_setting_wait
+        if self._ena_vib_setting == 1: # reset vib dds and set the pinc reg
+            vib_dict = vib_set_pinc(vib_dict, vib_time_base, self._vib_freqency, 32, self._fpga_clk_freq_MHz)
+            self.add_flodict(vib_dict)
+        elif self._ena_vib_setting == 2: # set vib phase and amplitude
+            vib_dict = vib_set_phase_ampl(vib_dict, vib_time_base, self._vib_phase, self._vib_amplitude, 32, 16, self._fpga_clk_freq_MHz)
+            self.add_flodict(vib_dict)
 
         # Automatic trigger pulse if master
         if self._mimo_master:
@@ -655,6 +699,169 @@ class Device:
                 sc.construct_packet({}, 0, command=sc.close_server_pkt), self._s
             )
     
+import math
+
+def vib_set_pinc(vib_dict, time_base, vib_freqency, phase_width=32, fpga_clk_freq_MHz=122.88):
+    """
+    Calculates and sets the Phase Increment (PINC) value for a VIB NCO.
+    This function also asserts a reset signal. (This function is unchanged)
+
+    Args:
+        vib_dict (dict): The dictionary to populate.
+        time_base (float): The base time (in microseconds) for this sequence.
+        vib_freqency (float): The desired output frequency in Hz.
+        phase_width (int): The bit width of the phase accumulator.
+        fpga_clk_freq_MHz (float): The FPGA clock frequency in MHz.
+
+    Returns:
+        dict: The modified vib_dict.
+    """
+    
+    # Calculate the clock period in microseconds (since clock is in MHz)
+    clk_period_us = 1.0 / fpga_clk_freq_MHz
+    
+    # --- PINC Calculation ---
+    
+    # 1. Calculate the FPGA clock frequency in Hz
+    fpga_clk_freq_hz = fpga_clk_freq_MHz * 1e6
+    
+    # 2. Calculate the frequency resolution (Hz per LSB of the phase accumulator)
+    # freq_res = (FPGA Clock Frequency) / (2^Phase Width)
+    freq_resolution = fpga_clk_freq_hz / (2**phase_width)
+    
+    # 3. Calculate the PINC register value
+    # PINC = (Desired Frequency) / (Frequency Resolution)
+    # We round to the nearest integer for the register value
+    pinc = int(round(vib_freqency / freq_resolution))
+    
+    # --- Dictionary Population ---
+    
+    # 'vib_rst': Reset pulse
+    # Time: [time_base, time_base + 1*clk]
+    # Value: [1 (assert reset), 0 (de-assert reset)]
+    vib_dict['vib_rst'][0].extend([time_base, time_base + clk_period_us])
+    vib_dict['vib_rst'][1].extend([1, 0])
+    
+    # 'vib_reg' (for PINC): PINC data
+    # Time: [time_base + 2*clk, time_base + 3*clk]
+    # Value: [pinc, 0 (hold value, or return to default)]
+    t_pinc_start = time_base + 2 * clk_period_us
+    t_pinc_end = time_base + 3 * clk_period_us
+    vib_dict['vib_reg'][0].extend([t_pinc_start, t_pinc_end])
+    vib_dict['vib_reg'][1].extend([pinc, 0])
+    
+    # 'vib_pinc_valid': PINC write enable (valid) signal
+    # Time: [time_base + 2*clk, time_base + 3*clk] (Matches the data timing)
+    # Value: [1 (assert valid), 0 (de-assert valid)]
+    vib_dict['vib_pinc_valid'][0].extend([t_pinc_start, t_pinc_end])
+    vib_dict['vib_pinc_valid'][1].extend([1, 0])
+    
+    return vib_dict
+
+def vib_set_phase_ampl(vib_dict, time_base, vib_phase_deg, vib_amplitude,  phase_width=32, amp_width=16, phase_add_width=16, fpga_clk_freq_MHz=122.88):
+    """
+    Calculates and sets the Phase Offset (POFF) and Amplitude (AMP) values.
+    **The amplitude calculation logic has been updated based on your clarification.**
+
+    Args:
+        vib_dict (dict): The dictionary to populate.
+        time_base (float): The base time (in microseconds) for this sequence.
+        vib_phase_deg (float): The desired phase offset in degrees (0-360).
+        vib_amplitude (float): The desired amplitude in Hz.
+        phase_width (int): The bit width of the main phase accumulator (used for freq resolution).
+        amp_width (int): The bit width of the amplitude register (unsigned, e.g., 16).
+        phase_add_width (int): The bit width of the DDS sine output (signed, e.g., 16).
+        fpga_clk_freq_MHz (float): The FPGA clock frequency in MHz.
+
+    Returns:
+        dict: The modified vib_dict.
+    """
+    
+    # Calculate the clock period in microseconds
+    clk_period_us = 1.0 / fpga_clk_freq_MHz
+    
+    # --- POFF (Phase Offset) Calculation ---
+    
+    # 1. Convert degrees (0-360) to a register value (0 to 2^phase_width)
+    poff_float = (vib_phase_deg % 360.0) / 360.0 * (2**phase_width)
+    
+    # 2. Round to the nearest integer
+    poff = int(round(poff_float))
+    
+    # --- Dictionary Population (POFF) ---
+    
+    # 'vib_reg' (for POFF): POFF data
+    # Time: [time_base, time_base + 1*clk]
+    # Value: [poff, 0 (hold value)]
+    t_poff_start = time_base
+    t_poff_end = time_base + clk_period_us
+    vib_dict['vib_reg'][0].extend([t_poff_start, t_poff_end])
+    vib_dict['vib_reg'][1].extend([poff, 0])
+    
+    # 'vib_poff_valid': POFF write enable (valid) signal
+    # Time: [time_base, time_base + 1*clk] (Matches the data timing)
+    # Value: [1 (assert valid), 0 (de-assert valid)]
+    vib_dict['vib_poff_valid'][0].extend([t_poff_start, t_poff_end])
+    vib_dict['vib_poff_valid'][1].extend([1, 0])
+    
+    # --- Amplitude Calculation (Revised Logic) ---
+    
+    # 1. Calculate the FPGA clock frequency in Hz
+    fpga_clk_freq_hz = fpga_clk_freq_MHz * 1e6
+    
+    # 2. Calculate the NCO's frequency resolution (Hz per LSB of the phase accumulator)
+    # This uses phase_width (e.g., 32)
+    freq_resolution = fpga_clk_freq_hz / (2**phase_width)
+    
+    # 3. Calculate the maximum positive output value of the (e.g., 16-bit) signed DDS
+    # This uses phase_add_width (e.g., 16). Value is 2^(N-1) - 1.
+    max_dds_output_val = (2**(phase_add_width - 1)) - 1  # This is 32767 for 16-bit
+    
+    # 4. Calculate the maximum amplitude in Hz (unscaled, i.e., at 1.0x gain)
+    # This is the "full scale" Hz value.
+    max_hz_amplitude = freq_resolution * max_dds_output_val
+    
+    # 5. Calculate the required scaling factor
+    # This is the ratio of desired Hz to the maximum possible Hz.
+    # We use abs() for safety, as the amp register is unsigned.
+    if max_hz_amplitude == 0:
+        scaling_factor = 0.0
+    else:
+        scaling_factor = abs(vib_amplitude) / max_hz_amplitude
+        
+    # 6. Calculate the amplitude register value.
+    # The (e.g., 16-bit) unsigned amp_width register represents this scaling factor.
+    # Amp_Reg / (2^amp_width) = scaling_factor
+    # So, Amp_Reg = scaling_factor * (2^amp_width)
+    amp_reg_val_float = scaling_factor * (2**amp_width)
+    
+    # 7. Clamp the value to the maximum possible for the unsigned register
+    max_amp_reg_val = (2**amp_width) - 1  # This is 65535 for 16-bit
+    if amp_reg_val_float > max_amp_reg_val:
+        amp_reg_val_float = max_amp_reg_val
+    elif amp_reg_val_float < 0:
+        amp_reg_val_float = 0
+        
+    # 8. Round to the nearest integer
+    amp_reg_val = int(round(amp_reg_val_float))
+
+    # --- Dictionary Population (Amplitude) ---
+    
+    # 'vib_reg' (for AMP): Amplitude data
+    # Time: [time_base + 2*clk, time_base + 3*clk]
+    # Value: [amp_reg_val, 0 (hold value)]
+    t_amp_start = time_base + 2 * clk_period_us
+    t_amp_end = time_base + 3 * clk_period_us
+    vib_dict['vib_reg'][0].extend([t_amp_start, t_amp_end])
+    vib_dict['vib_reg'][1].extend([amp_reg_val, 0])
+    
+    # 'vib_amp_valid': Amplitude write enable (valid) signal
+    # Time: [time_base + 2*clk, time_base + 3*clk] (Matches the data timing)
+    # Value: [1 (assert valid), 0 (de-assert valid)]
+    vib_dict['vib_amp_valid'][0].extend([t_amp_start, t_amp_end])
+    vib_dict['vib_amp_valid'][1].extend([1, 0])
+    
+    return vib_dict
 
 def build_rxgain_dict(rxgain_dict_src: dict, rx_gain: dict, time_base: float, append: bool = True, fpga_clk_freq_MHz: float = 122.88):
     """

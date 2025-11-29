@@ -132,6 +132,15 @@ def col2buf(col_idx, value):
         buf_idx = (16,)
         val = (value << 10,)
         mask = (0xFC00,)
+    elif col_idx == 36:  # vibration registers
+        buf_idx = (17, 18)  # vib_reg
+        val = (value >> 16, value & 0xFFFF)
+        mask = (0xFFFF, 0xFFFF)
+    elif col_idx in (37, 38, 39, 40): # vibration gates
+        buf_idx = (19, )
+        bit_idx = col_idx - 37 + 12
+        val = (value << bit_idx,)
+        mask = (0x1 << bit_idx,)
     return np.uint16(buf_idx), np.uint16(val), np.uint16(mask)
 
 
@@ -226,7 +235,10 @@ def dict2bin(
                 # TODO: these two rows aren't yet in the CSV and thus aren't tested by test_marga_model.py
                'rx0_lo', 'rx1_lo', 
                # rx gain control
-               'rxgain_write', 'rxgain_sel', 'rxgain_reg']
+               'rxgain_write', 'rxgain_sel', 'rxgain_reg',
+               # vibration reference reg and gates
+               'vib_reg', 'vib_pinc_valid', 'vib_poff_valid', 'vib_amp_valid', 'vib_rst'
+               ]
     
     changelist = []
     changelist_grad = []

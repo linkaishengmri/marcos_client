@@ -75,13 +75,15 @@ class OCRA1:
                 0, 0,
                 0, 0, 0, 0,
                 0, 0, 0, 0, 0, 0,
-                0, 0], dtype=np.uint16),
+                0, 0,
+                0,0,0,], dtype=np.uint16),
             'latencies': np.array([
                 0, 268, 268, # grad latencies match SPI div
                 0, 0, # rx
                 0, 0, 0, 0, # tx
                 0, 0, 0, 0, 0, 0, # lo phase
-                0, 0 # gates and LEDs
+                0, 0, # gates and LEDs
+                0,0,0 
             ], dtype=np.uint16)}
 
     def wait_for_ocra1_iface_idle(self):
@@ -214,13 +216,15 @@ class GPAFHDO:
                 0, 0,
                 0, 0, 0, 0,
                 0, 0, 0, 0, 0, 0,
-                0, 0], dtype=np.uint16),
+                0, 0,
+                0,0,0], dtype=np.uint16),
             'latencies': np.array([
                 0, 276, 276, # grad latencies match SPI div
                 0, 0, # rx
                 0, 0, 0, 0, # tx
                 0, 0, 0, 0, 0, 0, # lo phase
-                0, 0 # gates and LEDs
+                0, 0, # gates and LEDs
+                0,0,0
             ], dtype=np.uint16)}
 
     def wait_for_gpa_fhdo_iface_idle(self):
