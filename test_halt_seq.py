@@ -35,14 +35,18 @@ def reset_grad():
         mimo_master=True,
         trig_output_time=1e5,
         rx_gain={0:100, 1:100,2:100,3:100},
+        ena_vib_setting=2,
+        vib_freqency=1.0,
+        vib_amplitude=80.0,
+        vib_phase=50.0,
         **(params_shared)
     )
-    dev_s = Device(
-        ip_address=lc.ip_address_slave,
-        port=lc.port_slave,
-        trig_timeout=10,
-        **(params_shared)
-    )
+    # dev_s = Device(
+    #     ip_address=lc.ip_address_slave,
+    #     port=lc.port_slave,
+    #     trig_timeout=10,
+    #     **(params_shared)
+    # )
     dev_m.add_flodict({ 
                         'tx0':[np.array([100, 100000]), np.array([.01,0])],
                         'grad_vy':[np.array([100, 100000]), np.array([.01,0])],
@@ -50,20 +54,20 @@ def reset_grad():
                         'grad_vz2':[np.array([100, 100000]), np.array([.01,0])],
                         'rx0_en':[np.array([100, 100000]), np.array([1,0])],
                         })
-    dev_s.add_flodict({ 
-                        'tx0':[np.array([100, 100000]), np.array([.01,0])],
-                        'grad_vy':[np.array([100, 100000]), np.array([.01,0])],
-                        'grad_vz':[np.array([100, 100000]), np.array([.01,0])],
-                        'grad_vz2':[np.array([100, 100000]), np.array([.01,0])],
-                        'rx0_en':[np.array([100, 100000]), np.array([1,0])],
-                        })
+    # dev_s.add_flodict({ 
+    #                     'tx0':[np.array([100, 100000]), np.array([.01,0])],
+    #                     'grad_vy':[np.array([100, 100000]), np.array([.01,0])],
+    #                     'grad_vz':[np.array([100, 100000]), np.array([.01,0])],
+    #                     'grad_vz2':[np.array([100, 100000]), np.array([.01,0])],
+    #                     'rx0_en':[np.array([100, 100000]), np.array([1,0])],
+    #                     })
     
     rev1 = mimo_dev_run((dev_m, 0))
     print(rev1)
-    rev2 = mimo_dev_run((dev_s, 0))
-    print(rev2)
+    # rev2 = mimo_dev_run((dev_s, 0))
+    # print(rev2)
     dev_m.close_server(only_if_sim=True)
-    dev_s.__del__()   
+    # dev_s.__del__()   
 
 if __name__ == '__main__':
     reset_grad()

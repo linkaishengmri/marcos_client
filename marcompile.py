@@ -237,7 +237,7 @@ def dict2bin(
                # rx gain control
                'rxgain_write', 'rxgain_sel', 'rxgain_reg',
                # vibration reference reg and gates
-               'vib_reg', 'vib_pinc_valid', 'vib_poff_valid', 'vib_amp_valid', 'vib_rst'
+               'vib_reg', 'vib_pinc_valid', 'vib_poff_valid', 'vib_amp', 'vib_rst'
                ]
     
     changelist = []
