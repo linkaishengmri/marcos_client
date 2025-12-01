@@ -35,9 +35,9 @@ def reset_grad():
         mimo_master=True,
         trig_output_time=1e5,
         rx_gain={0:100, 1:100,2:100,3:100},
-        ena_vib_setting=2,
+        ena_vib_setting=1,
         vib_freqency=1.0,
-        vib_amplitude=80.0,
+        vib_amplitude=0.0,
         vib_phase=50.0,
         **(params_shared)
     )

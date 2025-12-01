@@ -343,7 +343,7 @@ class Device:
                     np.round(vals).astype(np.uint32),
                 )
                 tbin = (times_us(times + self._initial_wait) + 0,)
-            elif key in ['vib_pinc_valid', 'vib_poff_valid', 'vib_rst', 'vib_amp_valid']:
+            elif key in ['vib_pinc_valid', 'vib_poff_valid', 'vib_rst', 'vib_amp_valid', 'vib_pinc_high_valid', 'vib_poff_high_valid']:
                 keybin = (key,)
                 # binary-valued data
                 valbin = (vals.astype(np.int32),)
@@ -419,7 +419,9 @@ class Device:
             "rxgain_reg": (np.array([tstart, tstart + 1]), np.array([0])),
             "vib_reg": (np.array([tstart, tstart + 1]), np.array([0])),
             "vib_pinc_valid": (np.array([tstart, tstart + 1]), np.array([0])),
+            "vib_pinc_high_valid": (np.array([tstart, tstart + 1]), np.array([0])),
             "vib_poff_valid": (np.array([tstart, tstart + 1]), np.array([0])),
+            "vib_poff_high_valid": (np.array([tstart, tstart + 1]), np.array([0])),
             "vib_amp_valid": (np.array([tstart, tstart + 1]), np.array([0])),
             "vib_rst": (np.array([tstart, tstart + 1]), np.array([0])),
         }
@@ -462,10 +464,10 @@ class Device:
         # vibration reference configuration
         vib_time_base = tstart + vib_setting_wait
         if self._ena_vib_setting == 1: # reset vib dds and set the pinc reg
-            vib_dict = vib_set_pinc(vib_time_base, self._vib_freqency, 32, self._fpga_clk_freq_MHz)
+            vib_dict = vib_set_pinc(vib_time_base, self._vib_freqency, 64, self._fpga_clk_freq_MHz)
             self.add_flodict(vib_dict)
         elif self._ena_vib_setting == 2: # set vib phase and amplitude
-            vib_dict = vib_set_phase_ampl(vib_time_base, self._vib_phase, self._vib_amplitude, 31, 16, 16, self._fpga_clk_freq_MHz)
+            vib_dict = vib_set_phase_ampl(vib_time_base, self._vib_phase, self._vib_amplitude, 64, 31, 16, 16, self._fpga_clk_freq_MHz)
             self.add_flodict(vib_dict)
 
         # Automatic trigger pulse if master
@@ -693,7 +695,7 @@ class Device:
             )
     
 
-def vib_set_pinc(time_base, vib_freqency, phase_width=32, fpga_clk_freq_MHz=122.88):
+def vib_set_pinc(time_base, vib_freqency, phase_width=64, fpga_clk_freq_MHz=122.88):
     """
     Calculates and sets the Phase Increment (PINC) value for a VIB NCO.
     This function also asserts a reset signal. (This function is unchanged)
@@ -710,6 +712,7 @@ def vib_set_pinc(time_base, vib_freqency, phase_width=32, fpga_clk_freq_MHz=122.
     vib_dict = {
                 'vib_reg': [[], []],
                 'vib_pinc_valid': [[], []],
+                'vib_pinc_high_valid': [[], []],
                 'vib_rst': [[], []],
             }
     # Calculate the clock period in microseconds (since clock is in MHz)
@@ -728,6 +731,8 @@ def vib_set_pinc(time_base, vib_freqency, phase_width=32, fpga_clk_freq_MHz=122.
     # PINC = (Desired Frequency) / (Frequency Resolution)
     # We round to the nearest integer for the register value
     pinc = int(round(vib_freqency / freq_resolution))
+    pinc_high = ((pinc >> 32) & 0xFFFFFFFF)
+    pinc_low = (pinc & 0xFFFFFFFF)
     
     # --- Dictionary Population ---
     
@@ -738,25 +743,24 @@ def vib_set_pinc(time_base, vib_freqency, phase_width=32, fpga_clk_freq_MHz=122.
     vib_dict['vib_rst'][1].extend([1, 0])
     
     # 'vib_reg' (for PINC): PINC data
-    # Time: [time_base + 2*clk, time_base + 3*clk]
-    # Value: [pinc, 0 (hold value, or return to default)]
     t_pinc_start = time_base + 2 * clk_period_us
-    t_pinc_end = time_base + 3 * clk_period_us
-    vib_dict['vib_reg'][0].extend([t_pinc_start, t_pinc_end])
-    vib_dict['vib_reg'][1].extend([pinc, 0])
+    t_pinc_lowend = time_base + 3 * clk_period_us
+    t_pinc_end = time_base + 4 * clk_period_us
+    vib_dict['vib_reg'][0].extend([t_pinc_start, t_pinc_lowend, t_pinc_end])
+    vib_dict['vib_reg'][1].extend([pinc_low, pinc_high, 0])
     
     # 'vib_pinc_valid': PINC write enable (valid) signal
-    # Time: [time_base + 2*clk, time_base + 3*clk] (Matches the data timing)
-    # Value: [1 (assert valid), 0 (de-assert valid)]
-    vib_dict['vib_pinc_valid'][0].extend([t_pinc_start, t_pinc_end])
+    vib_dict['vib_pinc_valid'][0].extend([t_pinc_start, t_pinc_lowend])
     vib_dict['vib_pinc_valid'][1].extend([1, 0])
+    vib_dict['vib_pinc_high_valid'][0].extend([t_pinc_lowend, t_pinc_end])
+    vib_dict['vib_pinc_high_valid'][1].extend([1, 0])
     vib_dict_dst = {
         k: (np.array(v[0]), np.array(v[1])) for k, v in vib_dict.items()
     }
     return vib_dict_dst
     
 
-def vib_set_phase_ampl(time_base, vib_phase_deg, vib_amplitude, phase_width=31, amp_width=16, phase_add_width=16, fpga_clk_freq_MHz=122.88):
+def vib_set_phase_ampl(time_base, vib_phase_deg, vib_amplitude, phase_width=64, dds012_phase_width=31, amp_width=16, phase_add_width=16, fpga_clk_freq_MHz=122.88):
     """
     Calculates and sets the Phase Offset (POFF) and Amplitude (AMP) values.
     **The amplitude calculation logic has been updated based on your clarification.**
@@ -776,6 +780,7 @@ def vib_set_phase_ampl(time_base, vib_phase_deg, vib_amplitude, phase_width=31, 
     vib_dict = {
                 'vib_reg': [[], []],
                 'vib_poff_valid': [[], []],
+                'vib_poff_high_valid': [[], []],
                 'vib_amp_valid': [[], []],
             }
 
@@ -789,30 +794,29 @@ def vib_set_phase_ampl(time_base, vib_phase_deg, vib_amplitude, phase_width=31, 
     
     # 2. Round to the nearest integer
     poff = int(round(poff_float))
-    
+    poff_high = ((poff >> 32) & 0xFFFFFFFF)
+    poff_low = (poff & 0xFFFFFFFF)
     # --- Dictionary Population (POFF) ---
     
     # 'vib_reg' (for POFF): POFF data
-    # Time: [time_base, time_base + 1*clk]
-    # Value: [poff, 0 (hold value)]
     t_poff_start = time_base
-    t_poff_end = time_base + clk_period_us
-    vib_dict['vib_reg'][0].extend([t_poff_start, t_poff_end])
-    vib_dict['vib_reg'][1].extend([poff, 0])
+    t_poff_lowend = time_base + clk_period_us
+    t_poff_end = time_base + 2 * clk_period_us
+    vib_dict['vib_reg'][0].extend([t_poff_start, t_poff_lowend, t_poff_end])
+    vib_dict['vib_reg'][1].extend([poff_low, poff_high, 0])
     
     # 'vib_poff_valid': POFF write enable (valid) signal
-    # Time: [time_base, time_base + 1*clk] (Matches the data timing)
-    # Value: [1 (assert valid), 0 (de-assert valid)]
-    vib_dict['vib_poff_valid'][0].extend([t_poff_start, t_poff_end])
+    vib_dict['vib_poff_valid'][0].extend([t_poff_start, t_poff_lowend])
     vib_dict['vib_poff_valid'][1].extend([1, 0])
-    
+    vib_dict['vib_poff_high_valid'][0].extend([t_poff_lowend, t_poff_end])
+    vib_dict['vib_poff_high_valid'][1].extend([1, 0])
     # --- Amplitude Calculation (Revised Logic) ---
     
     # 1. Calculate the FPGA clock frequency in Hz
     fpga_clk_freq_hz = fpga_clk_freq_MHz * 1e6
     
     # 2. Calculate the NCO's frequency resolution (Hz per LSB of the phase accumulator)
-    freq_resolution = fpga_clk_freq_hz / (2**phase_width)
+    freq_resolution = fpga_clk_freq_hz / (2**dds012_phase_width)
     
     # 3. Calculate the maximum positive output value of the signed DDS
     # Excluding the sign bit and the reduction from multiplication right shift in vib_real_trunc_0
@@ -852,16 +856,12 @@ def vib_set_phase_ampl(time_base, vib_phase_deg, vib_amplitude, phase_width=31, 
     # --- Dictionary Population (Amplitude) ---
     
     # 'vib_reg' (for AMP): Amplitude data
-    # Time: [time_base + 2*clk, time_base + 3*clk]
-    # Value: [amp_reg_val, 0 (hold value)]
-    t_amp_start = time_base + 2 * clk_period_us
-    t_amp_end = time_base + 3 * clk_period_us
+    t_amp_start = time_base + 3 * clk_period_us
+    t_amp_end = time_base + 4 * clk_period_us
     vib_dict['vib_reg'][0].extend([t_amp_start, t_amp_end])
     vib_dict['vib_reg'][1].extend([amp_reg_val, 0])
     
     # 'vib_amp_valid': Amplitude write enable (valid) signal
-    # Time: [time_base + 2*clk, time_base + 3*clk] (Matches the data timing)
-    # Value: [1 (assert valid), 0 (de-assert valid)]
     vib_dict['vib_amp_valid'][0].extend([t_amp_start, t_amp_end])
     vib_dict['vib_amp_valid'][1].extend([1, 0])
     

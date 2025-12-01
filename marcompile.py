@@ -136,9 +136,9 @@ def col2buf(col_idx, value):
         buf_idx = (17, 18)  # vib_reg
         val = (value >> 16, value & 0xFFFF)
         mask = (0xFFFF, 0xFFFF)
-    elif col_idx in (37, 38, 39, 40): # vibration gates
+    elif col_idx in (37, 38, 39, 40, 41, 42): # vibration gates
         buf_idx = (19, )
-        bit_idx = col_idx - 37 + 12
+        bit_idx = col_idx - 37 + 10
         val = (value << bit_idx,)
         mask = (0x1 << bit_idx,)
     return np.uint16(buf_idx), np.uint16(val), np.uint16(mask)
@@ -237,7 +237,7 @@ def dict2bin(
                # rx gain control
                'rxgain_write', 'rxgain_sel', 'rxgain_reg',
                # vibration reference reg and gates
-               'vib_reg', 'vib_pinc_valid', 'vib_poff_valid', 'vib_amp', 'vib_rst'
+               'vib_reg', 'vib_pinc_high_valid', 'vib_poff_high_valid', 'vib_pinc_valid', 'vib_poff_valid', 'vib_amp_valid', 'vib_rst', 
                ]
     
     changelist = []
