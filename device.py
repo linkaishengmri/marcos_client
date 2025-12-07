@@ -89,6 +89,10 @@ class Device:
         halt_and_reset=False,  # upon connecting to the server, halt any existing sequences that may be running
         flush_old_rx=False,  # when debugging or developing new code, you may accidentally fill up the RX FIFOs - they will not automatically be cleared in case there is important data inside. Setting this true will always read them out and clear them before running a sequence. More advanced manual code can read RX from existing sequences.
         rx_gain={3:0}, # set the RX gain in percent, a dictionary for each channel 
+        ena_vib_setting=0, # 
+        vib_freqency=1, # 
+        vib_phase=0.0, # 
+        vib_amplitude=0.0, # 
     ):
         self._ip_address = ip_address
         self._port = port
