@@ -121,9 +121,12 @@ class Device:
             rx_lo = rx_lo, rx_lo  # extend to 2 elements
         self._rx_lo = rx_lo
 
-        assert grad_board in ("ocra1", "gpa-fhdo"), "Unknown gradient board!"
+        assert grad_board in ("ocra1", "gpa-fhdo", "ocra1_5761"), "Unknown gradient board!"
         if grad_board == "ocra1":
             gradb_class = gb.OCRA1
+            self._gpa_fhdo_offset_time = 0
+        elif grad_board == "ocra1_5761":
+            gradb_class = gb.OCRA1_5761
             self._gpa_fhdo_offset_time = 0
         else:
             gradb_class = gb.GPAFHDO
