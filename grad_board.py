@@ -171,6 +171,40 @@ class OCRA1:
     def bin2float(self, grad_bin):
         return ( ((grad_bin & 0x3ffff).astype(np.int32) ^ (1 << 17)) - (1 << 17) ).astype(np.int32) / 131072
 
+class OCRA1_5761(OCRA1):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def init_hw(self):
+        # Replace with the dedicated 4-step initialization sequence for AD5761
+        init_words = [
+            # 0x000F0000, 0x020F0000, 0x040F0000, 0x070F0000, # 1. Software full reset (Command 1111) -> Restore to default power-on state
+            0x000402A8, 0x020402A8, 0x040402A8, 0x070402A8, # 2. Control register (Command 0100) -> Internal ref ON (IRO=1),  Twos complement (B2C=1), +-10V output range (RA=000), Power-up & Clear to Midscale(0V) (PV=01, CV=01)
+            0x00070000, 0x02070000, 0x04070000, 0x07070000, # 3. Software data reset (Command 0111) -> Safely lock to 0V of the new +-10V range
+            0x00030000, 0x02030000, 0x04030000, 0x07030000, # 4. Write to and update DAC register (Command 0011) -> Force output to 0V
+        ]
+        
+        self.server_command({'direct': 0x00000000 | (1 << 0) | (self.spi_div << 2) | (0 << 8) | (0 << 9)})
+        self.server_command({'direct': 0x00000000 | (1 << 0) | (self.spi_div << 2) | (1 << 8) | (0 << 9)})
+
+        for k, iw in enumerate(init_words):
+            self.wait_for_ocra1_iface_idle()
+            self.server_command({'direct': 0x02000000 | (iw >> 16)})
+            self.server_command({'direct': 0x01000000 | (iw & 0xffff)})
+
+        self.server_command({'direct': 0x00000000})
+
+    def float2bin(self, grad_data, channel=0):
+        # Convert logic down from 18-bit to 16-bit
+        cv = self.cal_values[channel]
+        gd_cal = grad_data * cv[0] + cv[1] 
+        
+        # 16-bit twos complement full scale range is -32768 to +32767
+        return np.round(32767.49 * gd_cal).astype(np.uint32) & 0xFFFF 
+
+    def bin2float(self, grad_bin):
+        # Sign bit extension changed from bit 17 to bit 15
+        return ( ((grad_bin & 0xFFFF).astype(np.int32) ^ (1 << 15)) - (1 << 15) ).astype(np.int32) / 32768.0
 class GPAFHDO:
     def __init__(self,
                  server_command_f,

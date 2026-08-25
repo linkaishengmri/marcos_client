@@ -70,6 +70,14 @@ def col2buf(col_idx, value):
             grad_chan = col_idx - 9
             # always broadcast by default
             val_full = value << 2 | 0x00100000 | (grad_chan << 25) | 0x01000000
+        elif grad_board == "ocra1_5761":
+            if col_idx in (5, 6, 7, 8):
+                raise RuntimeError(
+                    "OCRA1 is selected, but you are trying to control GPA-FHDO"
+                )
+            grad_chan = col_idx - 9
+            # always broadcast by default
+            val_full = value | 0x00030000 | (grad_chan << 25) | 0x01000000
         else:
             raise ValueError("Unknown grad board")
 
@@ -328,7 +336,7 @@ def cl2bin(
             num_chgs[idx] += 1
             # assume the changes in changelist_grad are paired with LSBs/MSBs matching each other's grad channels stored sequentially,
             # and that for each event, the MSB update is first
-            if grad_board == "ocra1":  # simultaneous with another grad update
+            if grad_board == "ocra1" or grad_board == "ocra1_5761":  # simultaneous with another grad update
                 if msb:
                     # MSB buffer and not the first grad event on this timestep
                     if num_chgs[1]:
