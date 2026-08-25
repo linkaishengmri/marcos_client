@@ -42,6 +42,31 @@ def send_packet(packet, socket):
             return o  # quit function after 1st reply (could make this a thread in the future)
 
 
+def send_packet_stream(packet, socket):
+    """Send a request and yield successive replies until a chunked reply is final.
+
+    Used together with ``run_seq`` in chunked mode: the server replies with a
+    series of complete msgpack messages, each carrying a ``run_seq`` map that has a
+    ``final`` field. We yield every message (including the final one) and stop after
+    the final one is observed.
+    """
+    socket.sendall(msgpack.packb(packet))
+
+    unpacker = msgpack.Unpacker()
+    while True:
+        buf = socket.recv(1 << 20)
+        if not buf:
+            break
+        unpacker.feed(buf)
+        for o in unpacker:
+            yield o
+            # o is [reply_type, reply_index, 0, version, data_map, messages_map]
+            data_map = o[4] if len(o) > 4 else {}
+            run_seq = data_map.get("run_seq") if isinstance(data_map, dict) else None
+            if isinstance(run_seq, dict) and run_seq.get("final"):
+                return
+
+
 def command(server_dict, socket, print_infos=False, assert_errors=False):
     packet = construct_packet(server_dict)
     reply = send_packet(packet, socket)

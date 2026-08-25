@@ -121,6 +121,20 @@ class MimoDevices:
                 res = p.map(mimo_dev_run, self._pool_args)
         return res
 
+    def run_stream(self, chunk_points=None, rx_channels=None):
+        """Stream RX data back in chunks.
+
+        Yields ``(rxd_iq, msgs, meta)`` per chunk (same interface as
+        ``Device.run_stream``). Only the single-board case is supported for now.
+        """
+        if len(self._devs) == 1:
+            yield from self._devs[0].run_stream(chunk_points, rx_channels)
+        else:
+            raise NotImplementedError(
+                "Chunked streaming is currently only supported for a single board "
+                "(len(rp_ip_list) == 1)."
+            )
+
 
 def test_mimo_devices(single=True, reps=1, **kwargs):
     # importing here to avoid a circular import - these are just throwaway plotting functions

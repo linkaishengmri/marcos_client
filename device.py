@@ -645,20 +645,8 @@ class Device:
         ios.set_xlabel(r"time ($\mu$s)")
         return fd
 
-    def run(self):
-        """compile the TX and grad data, send everything over.
-        Returns the resultant data"""
-
-        if not self._seq_compiled:
-            self.compile()
-
-        if self._flush_old_rx:
-            rx_data_old, _ = sc.command({"read_rx": 0}, self._s)
-            # TODO: do something with RX data previously collected by the server
-
-        rx_data, msgs = sc.command({"run_seq": self._machine_code.tobytes()}, self._s)
-
-        rxd = rx_data[4]["run_seq"]
+    def _decode_run_seq_rxd(self, rxd):
+        """Convert a raw ``run_seq`` reply map into complex IQ arrays per channel."""
         rxd_iq = {}
 
         # (1 << 24) just for the int->float conversion to be reasonable - exact value doesn't matter for now
@@ -681,7 +669,68 @@ class Device:
         except (KeyError, TypeError):
             pass
 
+        return rxd_iq
+
+    def run(self):
+        """compile the TX and grad data, send everything over.
+        Returns the resultant data"""
+
+        if not self._seq_compiled:
+            self.compile()
+
+        if self._flush_old_rx:
+            rx_data_old, _ = sc.command({"read_rx": 0}, self._s)
+            # TODO: do something with RX data previously collected by the server
+
+        rx_data, msgs = sc.command({"run_seq": self._machine_code.tobytes()}, self._s)
+
+        rxd = rx_data[4]["run_seq"]
+        rxd_iq = self._decode_run_seq_rxd(rxd)
+
         return rxd_iq, msgs
+
+    def run_stream(self, chunk_points=None, rx_channels=None):
+        """Run the sequence and stream RX data back in chunks.
+
+        ``chunk_points`` is the number of raw RX samples (per channel) the server
+        should return per message. If ``None``/0 the behaviour matches :meth:`run`
+        but is still exposed as a one-shot generator for convenience.
+
+        ``rx_channels`` is an optional list of physical RX channels (0/1) that are
+        active for this acquisition; the server uses it to decide when a complete
+        chunk is available (all active channels reach ``chunk_points``).
+
+        Yields ``(rxd_iq, msgs, meta)`` per chunk where ``meta`` contains
+        ``chunk_index`` and ``final``.
+        """
+        if not self._seq_compiled:
+            self.compile()
+
+        if self._flush_old_rx:
+            sc.command({"read_rx": 0}, self._s)
+
+        if not chunk_points:
+            rxd_iq, msgs = self.run()
+            yield rxd_iq, msgs, {"chunk_index": 0, "final": True}
+            return
+
+        run_seq = {
+            "data": self._machine_code.tobytes(),
+            "chunk_points": int(chunk_points),
+        }
+        if rx_channels is not None:
+            run_seq["rx_channels"] = [int(c) for c in rx_channels]
+
+        request = {"run_seq": run_seq}
+        for reply in sc.send_packet_stream(sc.construct_packet(request), self._s):
+            rxd = reply[4]["run_seq"]
+            msgs = reply[5]
+            rxd_iq = self._decode_run_seq_rxd(rxd)
+            meta = {
+                "chunk_index": rxd.get("chunk_index", 0),
+                "final": bool(rxd.get("final", False)),
+            }
+            yield rxd_iq, msgs, meta
 
     def close_server(self, only_if_sim=False):
         ## Either always close server, or only close server if it's a simulation
