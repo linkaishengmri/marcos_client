@@ -51,7 +51,7 @@ class ServerTest(unittest.TestCase):
                                'not all client commands were understood']}
 
         if full_test:
-            versions = [ (1,0,1), (1,0,6), (1,3,100), (1,3,255), (2,5,7), (255,255,255) ]
+            versions = [ (1,0,1), (1,0,7), (1,3,100), (1,3,255), (2,5,7), (255,255,255) ]
             expected_outcomes = [diff_info, diff_equal, diff_warning, diff_warning, diff_error, diff_error]
         else:
             versions = [ (1,0,1) ]

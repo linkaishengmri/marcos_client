@@ -10,6 +10,7 @@ import local_config as lc
 import grad_board as gb
 import server_comms as sc
 import marcompile as mc
+from acquisition import AcquisitionAborted
 
 
 class Device:
@@ -394,6 +395,36 @@ class Device:
         self.add_intdict(self.flo2int(flodict), append)
         self._seq_compiled = False
 
+    def disable_mimo_sync(self):
+        """Restore direct-run timing when no slave board is participating.
+
+        Master waveform times are offset while floating-point events are added.
+        If a configured multi-board system later turns out to use only board 0,
+        remove that offset before compilation and suppress the trigger pulse.
+        """
+        if not self._mimo_master:
+            return
+        if self._seq_compiled:
+            raise RuntimeError(
+                "Cannot disable MIMO synchronisation after the sequence was compiled"
+            )
+
+        offset = int(round(
+            (self._trig_output_time + self._slave_trig_latency)
+            * self._fpga_clk_freq_MHz
+        ))
+        # RX-gain control is deliberately not shifted in flo2int().
+        unshifted_keys = {"rxgain_sel", "rxgain_write", "rxgain_reg"}
+        if self._seq is not None and offset:
+            for key, (times, values) in tuple(self._seq.items()):
+                if key not in unshifted_keys:
+                    self._seq[key] = (times - offset, values)
+
+        self._mimo_master = False
+        self._trig_output_time = 0
+        self._slave_trig_latency = 0
+        self._seq_compiled = False
+
     def compile(self):
         """Convert either dictionary or CSV file into machine code, with
         extra machine code at the start to ensure the system is initialised to
@@ -674,25 +705,105 @@ class Device:
 
         return rxd_iq
 
-    def run(self):
-        """compile the TX and grad data, send everything over.
-        Returns the resultant data"""
-
+    def prepare(self):
+        """Compile the current sequence without sending anything to hardware."""
         if not self._seq_compiled:
+            _t0 = time.perf_counter()
             self.compile()
+            print(f"[timing] device.run: compile {time.perf_counter() - _t0:.6f} s")
+
+    def run(
+        self,
+        report_armed=False,
+        on_armed=None,
+        on_started=None,
+        rearm=False,
+        send_context=None,
+        acquisition_id=None,
+    ):
+        """compile the TX and grad data, send everything over.
+        Returns the resultant data.
+
+        ``report_armed`` opts a trigger-waiting slave into the server's
+        intermediate ``armed`` reply.  ``on_armed`` is called only after the
+        server has observed the FPGA in ``TRIG_FOREVER``.  ``rearm`` explicitly
+        releases the server's emergency-stop latch immediately before this
+        scan; legacy direct calls retain the historical raw-binary request.
+        """
+
+        self.prepare()
+
+        if not hasattr(self._s, "sendall"):
+            print("[timing] device.run: no socket (hardware unavailable), skipping send")
+            return {}, {"warning": "no hardware"}
 
         if self._flush_old_rx:
             rx_data_old, _ = sc.command({"read_rx": 0}, self._s)
             # TODO: do something with RX data previously collected by the server
 
-        rx_data, msgs = sc.command({"run_seq": self._machine_code.tobytes()}, self._s)
+        if not (report_armed or rearm or on_started is not None):
+            rx_data, msgs = sc.command(
+                {"run_seq": self._machine_code.tobytes()},
+                self._s,
+                self._print_infos,
+                self._assert_errors,
+            )
 
-        rxd = rx_data[4]["run_seq"]
-        rxd_iq = self._decode_run_seq_rxd(rxd)
+            rxd = rx_data[4]["run_seq"]
+            if isinstance(rxd, dict) and rxd.get("aborted"):
+                raise AcquisitionAborted("Server aborted acquisition")
+            rxd_iq = self._decode_run_seq_rxd(rxd)
+            return rxd_iq, msgs
 
-        return rxd_iq, msgs
+        run_seq = {
+            "data": self._machine_code.tobytes(),
+            "rearm": bool(rearm),
+            "report_armed": bool(report_armed),
+            "grad_board": self._grad_board,
+        }
+        if acquisition_id is not None:
+            run_seq["acquisition_id"] = str(acquisition_id)
+        request = {"run_seq": run_seq}
+        armed_seen = not report_armed
+        replies = sc.send_packet_stream(
+            sc.construct_packet(request),
+            self._s,
+            on_sent=on_started,
+            send_context=send_context,
+        )
+        for reply in replies:
+            raw_rxd = reply[4].get("run_seq", {})
+            if isinstance(raw_rxd, dict) and raw_rxd.get("aborted"):
+                sc.process_reply(reply, self._print_infos, False)
+                raise AcquisitionAborted("Server aborted acquisition")
 
-    def run_stream(self, chunk_points=None, rx_channels=None):
+            _, msgs = sc.process_reply(
+                reply, self._print_infos, self._assert_errors
+            )
+            if isinstance(raw_rxd, dict) and raw_rxd.get("armed"):
+                if not armed_seen:
+                    armed_seen = True
+                    if on_armed is not None:
+                        on_armed()
+                continue
+
+            if not armed_seen:
+                raise RuntimeError(
+                    "MIMO slave run completed without the required armed event"
+                )
+
+            return self._decode_run_seq_rxd(raw_rxd), msgs
+
+        raise ConnectionError("Server closed run_seq before its final reply")
+
+    def run_stream(
+        self,
+        chunk_points=None,
+        rx_channels=None,
+        on_started=None,
+        send_context=None,
+        acquisition_id=None,
+    ):
         """Run the sequence and stream RX data back in chunks.
 
         ``chunk_points`` is the number of raw RX samples (per channel) the server
@@ -707,33 +818,72 @@ class Device:
         ``chunk_index`` and ``final``.
         """
         if not self._seq_compiled:
+            _t0 = time.perf_counter()
             self.compile()
+            print(f"[timing] device.run_stream: compile {time.perf_counter() - _t0:.6f} s")
+
+        if not hasattr(self._s, "sendall"):
+            print("[timing] device.run_stream: no socket (hardware unavailable), skipping send")
+            return
 
         if self._flush_old_rx:
             sc.command({"read_rx": 0}, self._s)
 
         if not chunk_points:
-            rxd_iq, msgs = self.run()
+            rxd_iq, msgs = self.run(
+                rearm=True,
+                on_started=on_started,
+                send_context=send_context,
+                acquisition_id=acquisition_id,
+            )
             yield rxd_iq, msgs, {"chunk_index": 0, "final": True}
             return
 
         run_seq = {
             "data": self._machine_code.tobytes(),
             "chunk_points": int(chunk_points),
+            "rearm": True,
+            "report_armed": False,
+            "grad_board": self._grad_board,
         }
+        if acquisition_id is not None:
+            run_seq["acquisition_id"] = str(acquisition_id)
         if rx_channels is not None:
             run_seq["rx_channels"] = [int(c) for c in rx_channels]
 
         request = {"run_seq": run_seq}
-        for reply in sc.send_packet_stream(sc.construct_packet(request), self._s):
+        for reply in sc.send_packet_stream(
+            sc.construct_packet(request),
+            self._s,
+            on_sent=on_started,
+            send_context=send_context,
+        ):
             rxd = reply[4]["run_seq"]
-            msgs = reply[5]
+            if isinstance(rxd, dict) and rxd.get("aborted"):
+                sc.process_reply(reply, self._print_infos, False)
+                raise AcquisitionAborted("Server aborted acquisition")
+            _, msgs = sc.process_reply(
+                reply, self._print_infos, self._assert_errors
+            )
             rxd_iq = self._decode_run_seq_rxd(rxd)
             meta = {
                 "chunk_index": rxd.get("chunk_index", 0),
                 "final": bool(rxd.get("final", False)),
             }
             yield rxd_iq, msgs, meta
+
+    def emergency_stop(self, timeout=2.0, acquisition_id=None):
+        """Emergency-stop this board using a new, independent connection."""
+        with socket.create_connection(
+            (self._ip_address, self._port), timeout=timeout
+        ) as stop_socket:
+            stop_socket.settimeout(timeout)
+            payload = {"grad_board": self._grad_board}
+            if acquisition_id is not None:
+                payload["acquisition_id"] = str(acquisition_id)
+            packet = sc.construct_packet(payload, command=sc.emergency_stop_pkt)
+            reply = sc.send_packet(packet, stop_socket)
+            return sc.validate_emergency_stop_reply(reply)
 
     def close_server(self, only_if_sim=False):
         ## Either always close server, or only close server if it's a simulation
