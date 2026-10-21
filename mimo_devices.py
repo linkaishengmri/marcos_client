@@ -159,14 +159,16 @@ class MimoDevices:
             )
 
     @staticmethod
-    def _advance_to_running(session):
+    def _advance_to_running(session, on_started=None):
         session.transition(AcquisitionState.RUNNING)
+        if on_started is not None:
+            on_started()
 
     @staticmethod
     def _inactive_result():
         return ({}, {"warning": "No sequence execution elements, sequence not executed"})
 
-    def _run_single(self, session):
+    def _run_single(self, session, on_started=None):
         session.transition(AcquisitionState.STARTING_MASTER)
         dev = self._devs[0]
         session.register_board(
@@ -175,7 +177,7 @@ class MimoDevices:
         session.checkpoint()
         result = dev.run(
             rearm=True,
-            on_started=lambda: self._advance_to_running(session),
+            on_started=lambda: self._advance_to_running(session, on_started),
             send_context=session.send_guard,
             acquisition_id=session.acquisition_id,
         )
@@ -184,7 +186,7 @@ class MimoDevices:
         results[0] = result
         return results
 
-    def _run_multiple(self, session, active_board_ids):
+    def _run_multiple(self, session, active_board_ids, on_started=None):
         session.transition(AcquisitionState.ARMING_SLAVES)
         for board_id in active_board_ids:
             dev = self._devs[board_id]
@@ -253,7 +255,7 @@ class MimoDevices:
         results = [self._inactive_result() for _ in self._devs]
         results[0] = self._devs[0].run(
             rearm=True,
-            on_started=lambda: self._advance_to_running(session),
+            on_started=lambda: self._advance_to_running(session, on_started),
             send_context=session.send_guard,
             acquisition_id=session.acquisition_id,
         )
@@ -276,11 +278,14 @@ class MimoDevices:
             thread.join(timeout=0)
         return results
 
-    def run(self, session=None):
+    def run(self, session=None, on_started=None):
         """Run all boards with a confirmed armed barrier for the MIMO case.
 
         Lifecycle finalisation is intentionally left to the owning sequence:
         one sequence may perform multiple batches/scans with the same session.
+        ``on_started`` runs after the master's complete request has been sent
+        (and, for MIMO, after all slaves confirmed armed). It is not an FPGA
+        execution acknowledgement.
         """
         session = self._session if session is None else session
         self._session = session
@@ -316,8 +321,8 @@ class MimoDevices:
             session.checkpoint()
 
             if len(active_board_ids) == 1:
-                return self._run_single(session)
-            return self._run_multiple(session, active_board_ids)
+                return self._run_single(session, on_started)
+            return self._run_multiple(session, active_board_ids, on_started)
         except AcquisitionAborted:
             session.ensure_hardware_stopped()
             raise
@@ -330,11 +335,12 @@ class MimoDevices:
     def emergency_stop(self, timeout=2.0):
         return self._session.stop(timeout)
 
-    def run_stream(self, chunk_points=None, rx_channels=None, session=None):
+    def run_stream(self, chunk_points=None, rx_channels=None, session=None, on_started=None):
         """Stream RX data back in chunks.
 
         Yields ``(rxd_iq, msgs, meta)`` per chunk (same interface as
         ``Device.run_stream``). Only the single-board case is supported for now.
+        ``on_started`` has the same send-completion boundary as :meth:`run`.
         """
         if len(self._devs) != 1:
             raise NotImplementedError(
@@ -357,7 +363,7 @@ class MimoDevices:
             yield from dev.run_stream(
                 chunk_points,
                 rx_channels,
-                on_started=lambda: self._advance_to_running(session),
+                on_started=lambda: self._advance_to_running(session, on_started),
                 send_context=session.send_guard,
                 acquisition_id=session.acquisition_id,
             )

@@ -4,3 +4,7 @@ local_config.py
 *.log
 *.vscode
 # ocra_lib/
+
+# Keep new local tests out of commits; existing tracked tests keep their history.
+test_*.py
+**/tests/

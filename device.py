@@ -871,6 +871,12 @@ class Device:
                 "final": bool(rxd.get("final", False)),
             }
             yield rxd_iq, msgs, meta
+            if meta["final"]:
+                return
+
+        # EOF is not a successful scan completion, even when all expected RX
+        # samples arrived. The final reply also carries hardware error status.
+        raise ConnectionError("Server closed run_seq stream before its final reply")
 
     def emergency_stop(self, timeout=2.0, acquisition_id=None):
         """Emergency-stop this board using a new, independent connection."""
