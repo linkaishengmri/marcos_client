@@ -807,6 +807,8 @@ class Device:
         on_started=None,
         send_context=None,
         acquisition_id=None,
+        report_armed=False,
+        on_armed=None,
     ):
         """Run the sequence and stream RX data back in chunks.
 
@@ -820,6 +822,8 @@ class Device:
 
         Yields ``(rxd_iq, msgs, meta)`` per chunk where ``meta`` contains
         ``chunk_index`` and ``final``.
+        ``report_armed`` / ``on_armed`` have the same slave handshake semantics
+        as :meth:`run`; armed replies are control events, not RX chunks.
         """
         if not self._seq_compiled:
             _t0 = time.perf_counter()
@@ -836,6 +840,8 @@ class Device:
         if not chunk_points:
             rxd_iq, msgs = self.run(
                 rearm=True,
+                report_armed=report_armed,
+                on_armed=on_armed,
                 on_started=on_started,
                 send_context=send_context,
                 acquisition_id=acquisition_id,
@@ -847,7 +853,7 @@ class Device:
             "data": self._machine_code.tobytes(),
             "chunk_points": int(chunk_points),
             "rearm": True,
-            "report_armed": False,
+            "report_armed": bool(report_armed),
             "grad_board": self._grad_board,
         }
         if acquisition_id is not None:
@@ -856,6 +862,7 @@ class Device:
             run_seq["rx_channels"] = [int(c) for c in rx_channels]
 
         request = {"run_seq": run_seq}
+        armed_seen = not report_armed
         for reply in sc.send_packet_stream(
             sc.construct_packet(request),
             self._s,
@@ -869,6 +876,16 @@ class Device:
             _, msgs = sc.process_reply(
                 reply, self._print_infos, self._assert_errors
             )
+            if isinstance(rxd, dict) and rxd.get("armed"):
+                if not armed_seen:
+                    armed_seen = True
+                    if on_armed is not None:
+                        on_armed()
+                continue
+            if not armed_seen:
+                raise RuntimeError(
+                    "MIMO slave stream received data or completion without the required armed event"
+                )
             rxd_iq = self._decode_run_seq_rxd(rxd)
             meta = {
                 "chunk_index": rxd.get("chunk_index", 0),

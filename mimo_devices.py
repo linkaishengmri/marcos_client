@@ -5,6 +5,7 @@
 import queue
 import socket, time, warnings
 import threading
+from contextlib import closing
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -190,6 +191,14 @@ class MimoDevices:
         return results
 
     def _run_multiple(self, session, active_board_ids, on_started=None):
+        with closing(self._run_multiple_events(session, active_board_ids, on_started)) as events:
+            for kind, payload in events:
+                if kind == "done":
+                    return payload
+
+    def _run_multiple_events(self, session, active_board_ids, on_started=None,
+                             rx_channel=None, chunk_points=None):
+        """Share the armed barrier between ordinary runs and one RX stream."""
         session.transition(AcquisitionState.ARMING_SLAVES)
         for board_id in active_board_ids:
             dev = self._devs[board_id]
@@ -198,8 +207,17 @@ class MimoDevices:
             )
         session.checkpoint()
 
-        events = queue.Queue()
+        events = queue.Queue(maxsize=8 if rx_channel is not None else 0)
         threads = []
+        closing_workers = threading.Event()
+
+        def post_event(event):
+            while not closing_workers.is_set():
+                try:
+                    events.put(event, timeout=0.05)
+                    return
+                except queue.Full:
+                    pass
 
         def board_worker(board_id, dev):
             try:
@@ -210,87 +228,114 @@ class MimoDevices:
                 else:
                     callbacks = {
                         "report_armed": True,
-                        "on_armed": lambda: events.put(("armed", board_id, None)),
+                        "on_armed": lambda: post_event(("armed", board_id, None)),
                     }
-                result = dev.run(
-                    rearm=True,
+                kwargs = dict(
                     send_context=session.send_guard,
                     acquisition_id=session.acquisition_id,
                     **callbacks,
                 )
-                events.put(("done", board_id, result))
+                if rx_channel is not None and board_id == rx_channel // 2:
+                    physical_key = f"rx{rx_channel % 2}"
+                    for rxd, msgs, meta in dev.run_stream(
+                            chunk_points, [rx_channel % 2], **kwargs):
+                        session.checkpoint()
+                        if physical_key not in rxd and not meta.get("final"):
+                            raise RuntimeError(f"RX chunk is missing {physical_key} on board {board_id}")
+                        data = {f"rx{rx_channel}": rxd[physical_key]} if physical_key in rxd else {}
+                        post_event(("chunk", board_id, (data, msgs, meta)))
+                        if closing_workers.is_set():
+                            return
+                    result = ({}, {})
+                else:
+                    result = dev.run(rearm=True, **kwargs)
+                post_event(("done", board_id, result))
             except BaseException as exc:
-                events.put(("error", board_id, exc))
+                post_event(("error", board_id, exc))
 
-        slave_board_ids = active_board_ids[1:]
-        for board_id in slave_board_ids:
+        def start_board(board_id):
             dev = self._devs[board_id]
             session.checkpoint()
             thread = threading.Thread(
                 target=board_worker,
                 args=(board_id, dev),
-                name=f"marga-slave-{board_id}",
+                name=f"marga-board-{board_id}",
                 daemon=True,
             )
             thread.start()
             threads.append(thread)
 
-        session.transition(AcquisitionState.WAITING_ALL_ARMED)
-        waiting = set(slave_board_ids)
-        deadline = time.monotonic() + self._armed_timeout
-        while waiting:
+        complete = False
+        try:
+            slave_board_ids = active_board_ids[1:]
+            for board_id in slave_board_ids:
+                start_board(board_id)
+
+            session.transition(AcquisitionState.WAITING_ALL_ARMED)
+            waiting = set(slave_board_ids)
+            deadline = time.monotonic() + self._armed_timeout
+            while waiting:
+                session.checkpoint()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"Timed out waiting for MIMO slaves to arm: {sorted(waiting)}"
+                    )
+                try:
+                    kind, board_id, payload = events.get(timeout=min(0.05, remaining))
+                except queue.Empty:
+                    continue
+                session.checkpoint()
+                if kind == "armed":
+                    waiting.discard(board_id)
+                elif kind == "error":
+                    raise payload
+                else:
+                    raise RuntimeError(
+                        f"MIMO slave {board_id} completed before the master started"
+                    )
+
             session.checkpoint()
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError(
-                    f"Timed out waiting for MIMO slaves to arm: {sorted(waiting)}"
-                )
-            try:
-                kind, board_id, payload = events.get(timeout=min(0.05, remaining))
-            except queue.Empty:
-                continue
-            if kind == "armed":
-                waiting.discard(board_id)
-            elif kind == "error":
-                raise payload
-            else:
-                # A slave cannot legitimately finish before the master has
-                # emitted its trigger. Treat an early completion as a lost
-                # synchronisation event, even if that slave reported armed.
-                raise RuntimeError(
-                    f"MIMO slave {board_id} completed before the master started"
-                )
+            session.transition(AcquisitionState.STARTING_MASTER)
+            results = [self._inactive_result() for _ in self._devs]
+            start_board(0)
+            completed = set()
 
-        session.checkpoint()
-        session.transition(AcquisitionState.STARTING_MASTER)
-        results = [self._inactive_result() for _ in self._devs]
-        # Keep receiving slave failures while the master waits for its reply.
-        thread = threading.Thread(
-            target=board_worker,
-            args=(0, self._devs[0]),
-            name="marga-master",
-            daemon=True,
-        )
-        thread.start()
-        threads.append(thread)
+            while len(completed) < len(active_board_ids):
+                session.checkpoint()
+                try:
+                    kind, board_id, payload = events.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                session.checkpoint()
+                if kind == "error":
+                    raise payload
+                if kind == "chunk":
+                    yield kind, payload
+                if kind == "done":
+                    results[board_id] = payload
+                    completed.add(board_id)
 
-        completed = set()
-
-        while len(completed) < len(active_board_ids):
-            session.checkpoint()
-            try:
-                kind, board_id, payload = events.get(timeout=0.05)
-            except queue.Empty:
-                continue
-            if kind == "error":
-                raise payload
-            if kind == "done":
-                results[board_id] = payload
-                completed.add(board_id)
-
-        for thread in threads:
-            thread.join(timeout=0)
-        return results
+            complete = True
+            yield "done", results
+        finally:
+            closing_workers.set()
+            if rx_channel is not None and not complete:
+                # Also covers a caller closing the stream before its final reply.
+                if session.cancelled:
+                    session.ensure_hardware_stopped()
+                else:
+                    session.fail(stop_hardware=True)
+                # Release blocked data sockets after the independent Stop requests.
+                for board_id in active_board_ids:
+                    sock = getattr(self._devs[board_id], "_s", None)
+                    if sock is not None:
+                        try:
+                            sock.shutdown(socket.SHUT_RDWR)
+                        except (AttributeError, OSError):
+                            pass
+            for thread in threads:
+                thread.join(timeout=1.0 if rx_channel is not None else 0)
 
     def run(self, session=None, on_started=None):
         """Run all boards with a confirmed armed barrier for the MIMO case.
@@ -353,20 +398,51 @@ class MimoDevices:
         """Stream RX data back in chunks.
 
         Yields ``(rxd_iq, msgs, meta)`` per chunk (same interface as
-        ``Device.run_stream``). Only the single-board case is supported for now.
+        ``Device.run_stream``). Multiple boards may execute, but exactly one
+        logical RX channel must be selected in that case. Single-board channel
+        selection is unchanged. RX names in yielded chunks are logical names.
         ``on_started`` has the same send-completion boundary as :meth:`run`.
         """
-        if len(self._devs) != 1:
-            raise NotImplementedError(
-                "Chunked streaming is currently only supported for a single board "
-                "(len(rp_ip_list) == 1)."
-            )
+        rx_channel = None
+        if len(self._devs) > 1:
+            if rx_channels is None or len(rx_channels) != 1:
+                raise NotImplementedError("Multi-board chunked streaming requires exactly one logical RX channel")
+            rx_channel = int(rx_channels[0])
+            if rx_channel != rx_channels[0] or not 0 <= rx_channel < 2 * len(self._devs):
+                raise ValueError("RX channel must identify a configured board and physical channel 0/1")
 
         session = self._session if session is None else session
         self._session = session
         self._prepare_session(session)
         dev = self._devs[0]
         try:
+            if rx_channel is not None:
+                active_board_ids = [i for i, board in enumerate(self._devs) if board._seq is not None]
+                if 0 not in active_board_ids or rx_channel // 2 not in active_board_ids:
+                    raise ValueError("The master and selected RX board must both have sequence data")
+                if len(active_board_ids) > 1:
+                    if not dev._mimo_master:
+                        raise RuntimeError("Create a new MimoDevices instance before activating slave boards")
+                    for board_id in active_board_ids:
+                        session.checkpoint()
+                        self._devs[board_id].prepare()
+                    final_chunk = None
+                    with closing(self._run_multiple_events(
+                            session, active_board_ids, on_started,
+                            rx_channel, chunk_points)) as events:
+                        for kind, payload in events:
+                            session.checkpoint()
+                            if kind == "chunk":
+                                if payload[2].get("final"):
+                                    final_chunk = payload
+                                else:
+                                    yield payload
+                    if final_chunk is None:
+                        raise ConnectionError("RX stream ended without its final reply")
+                    session.checkpoint()
+                    yield final_chunk  # Success only after every participating board finished.
+                    return
+                dev.disable_mimo_sync()
             session.checkpoint()
             dev.prepare()
             session.transition(AcquisitionState.STARTING_MASTER)

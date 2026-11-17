@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import socket
 import threading
 import time
 import unittest
@@ -654,6 +655,353 @@ class DeviceProtocolTest(unittest.TestCase):
         reply[0] = 129
         with self.assertRaises(RuntimeError):
             sc.validate_emergency_stop_reply(reply)
+
+
+def _set_event():
+    event = threading.Event()
+    event.set()
+    return event
+
+
+class _BoardSocket:
+    def __init__(self, rig, board_id):
+        self.rig, self.board_id = rig, board_id
+        self.requests = []
+        self.sent = threading.Event()
+        self.armed = threading.Event()
+        self.final_sent = threading.Event()
+        self.closed = threading.Event()
+        self.arm_gate = _set_event()
+        self.finish_gate = _set_event()
+        self.tail_points = 0
+        self.final_error = None
+        self.drop_final = False
+        self.omit_armed = False
+        self._buffer = b""
+
+    def sendall(self, data):
+        request = msgpack.unpackb(data, raw=False)[4]['run_seq']
+        self.requests.append(request)
+        self._frames = self.frames(request)
+        self.sent.set()
+        if self.board_id == 0:
+            self.rig.armed_at_start = [wire.armed.is_set() for wire in self.rig.wires[1:]
+                                       if self.rig.devices.dev(wire.board_id)._seq is not None]
+            self.rig.master_started.set()
+
+    def wait_for(self, event):
+        deadline = time.monotonic() + 3
+        while not event.wait(.005):
+            if self.closed.is_set():
+                raise ConnectionError('Fake board socket shut down')
+            if time.monotonic() > deadline:
+                raise TimeoutError('Test did not release the board')
+        if self.closed.is_set():
+            raise ConnectionError('Fake board socket shut down')
+
+    @staticmethod
+    def packet(data, error=None):
+        reply = DeviceProtocolTest.reply(data)
+        if error:
+            reply[5] = {'errors': [error]}
+        return msgpack.packb(reply)
+
+    def frames(self, request):
+        if request.get('report_armed'):
+            self.wait_for(self.arm_gate)
+            if self.omit_armed:
+                yield self.packet({'final': True})
+                return
+            self.armed.set()
+            yield self.packet({'armed': True, 'final': False})
+        self.wait_for(self.rig.master_started)
+        points = request.get('chunk_points', 0)
+        channels = request.get('rx_channels', [0])
+
+        def samples(count):
+            return {f'rx{ch}_{part}': [ch + 1] * count
+                    for ch in channels for part in ('i', 'q')}
+
+        if points:
+            yield self.packet(dict(samples(points), chunk_index=0, final=False))
+        self.wait_for(self.finish_gate)
+        if self.drop_final:
+            return
+        self.final_sent.set()
+        tail = samples(self.tail_points) if points and self.tail_points else {}
+        yield self.packet(dict(tail, chunk_index=1 if points else 0, final=True), self.final_error)
+
+    def recv(self, size):
+        if not self._buffer:
+            self._buffer = next(self._frames, b'')
+        # Exercise framing across arbitrary socket reads as well as concurrency.
+        data, self._buffer = self._buffer[:17], self._buffer[17:]
+        return data
+
+    def shutdown(self, _how):
+        self.closed.set()
+
+
+class _Rig:
+    def __init__(self, count):
+        self.master_started = threading.Event()
+        self.armed_at_start = []
+        self.wires = [_BoardSocket(self, i) for i in range(count)]
+        self.devices = MimoDevices.__new__(MimoDevices)
+        self.devices._session = AcquisitionSession()
+        self.devices._armed_timeout = .15
+        self.devices._devs = []
+        for i, wire in enumerate(self.wires):
+            dev = DeviceProtocolTest.make_device([])
+            dev._s = wire
+            dev._seq = {'fake': ([], [])}
+            dev._ip_address, dev._port = f'board{i}.invalid', 11111
+            dev._mimo_master = i == 0 and count > 1
+            # Real compilation/timing is covered by test_acquisition.RxGainTest.
+            dev.disable_mimo_sync = lambda dev=dev: setattr(dev, '_mimo_master', False)
+            self.devices._devs.append(dev)
+
+
+class MimoStreamTest(unittest.TestCase):
+    def setUp(self):
+        self.rigs = []
+        self.stop_ids = []
+        self.enterContext(mock.patch.object(
+            socket.socket, 'connect', side_effect=AssertionError('No real hardware in tests')))
+        self.enterContext(mock.patch.object(
+            AcquisitionSession, '_stop_board', side_effect=self.stop_board))
+
+    def make_rig(self, count=2):
+        self.rig = _Rig(count)
+        self.rigs.append(self.rig)
+        return self.rig
+
+    def stop_board(self, board, timeout, acquisition_id):
+        self.stop_ids.append(board.board_id)
+        self.rig.wires[board.board_id].shutdown(socket.SHUT_RDWR)
+        return {'ok': True}
+
+    def tearDown(self):
+        for rig in self.rigs:
+            for wire in rig.wires:
+                wire.shutdown(socket.SHUT_RDWR)
+        self.assertFalse([thread.name for thread in threading.enumerate()
+                          if thread.name.startswith('marga-board-')])
+
+    def collect_async(self, stream):
+        records, errors = [], []
+        finished = threading.Event()
+
+        def collect():
+            try:
+                records.extend(stream)
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                finished.set()
+
+        thread = threading.Thread(target=collect, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 3)
+        return records, errors, finished
+
+    def test_single_channel_on_master_or_any_slave_maps_back_to_logical_rx(self):
+        for channel in range(6):
+            with self.subTest(channel=channel):
+                rig = self.make_rig(3)
+                rig.wires[channel // 2].tail_points = 2
+                starts = []
+                records = list(rig.devices.run_stream(4, [channel], on_started=lambda: starts.append(True)))
+                self.assertEqual(starts, [True])
+                self.assertEqual(rig.armed_at_start, [True, True])
+                self.assertEqual([item[2]['final'] for item in records], [False, True])
+                self.assertEqual([len(item[0][f'rx{channel}']) for item in records], [4, 2])
+                for data, _, _ in records:
+                    self.assertEqual(set(data), {f'rx{channel}'})
+                    np.testing.assert_allclose(data[f'rx{channel}'], (channel % 2 + 1) * (1 + 1j) / 2**24)
+                for i, wire in enumerate(rig.wires):
+                    request = wire.requests[0]
+                    self.assertEqual(request['acquisition_id'], rig.devices.session.acquisition_id)
+                    self.assertTrue(request['rearm'])
+                    self.assertEqual(request['report_armed'], i != 0)
+                    if i == channel // 2:
+                        self.assertEqual(request['rx_channels'], [channel % 2])
+                    else:
+                        self.assertNotIn('chunk_points', request)
+                self.assertEqual(rig.devices.session.state, AcquisitionState.RUNNING)
+
+    def test_single_board_two_channel_stream_is_unchanged(self):
+        rig = self.make_rig(1)
+        records = list(rig.devices.run_stream(4, [0, 1]))
+        self.assertEqual(set(records[0][0]), {'rx0', 'rx1'})
+        self.assertEqual(records[-1][0], {})
+        self.assertTrue(records[-1][2]['final'])
+        self.assertFalse(rig.wires[0].requests[0]['report_armed'])
+
+    def test_inactive_slaves_use_direct_master_stream(self):
+        rig = self.make_rig(3)
+        for board in rig.devices._devs[1:]:
+            board._seq = None
+        records = list(rig.devices.run_stream(4, [1]))
+        self.assertIn('rx1', records[0][0])
+        self.assertFalse(rig.devices.dev(0)._mimo_master)
+        self.assertEqual(rig.devices.session.participating_board_ids, (0,))
+        self.assertTrue(all(not wire.requests for wire in rig.wires[1:]))
+
+    def test_chunks_arrive_while_master_runs_but_final_waits_for_master(self):
+        rig = self.make_rig()
+        rig.wires[0].finish_gate.clear()
+        stream = rig.devices.run_stream(4, [3])
+        first = next(stream)
+        self.assertIn('rx3', first[0])
+        self.assertFalse(rig.wires[0].final_sent.is_set())
+        records, errors, finished = self.collect_async(stream)
+        self.assertTrue(rig.wires[1].final_sent.wait(1))
+        self.assertFalse(finished.wait(.05))
+        rig.wires[0].finish_gate.set()
+        self.assertTrue(finished.wait(1))
+        self.assertEqual(errors, [])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0][0], {})
+        self.assertTrue(records[0][2]['final'])
+
+    def test_late_master_error_is_not_hidden_by_rx_final(self):
+        rig = self.make_rig()
+        rig.wires[0].finish_gate.clear()
+        rig.wires[0].final_error = 'master execution failed'
+        records, errors, finished = self.collect_async(rig.devices.run_stream(4, [2]))
+        self.assertTrue(rig.wires[1].final_sent.wait(1))
+        self.assertFalse(finished.wait(.05))
+        rig.wires[0].finish_gate.set()
+        self.assertTrue(finished.wait(1))
+        self.assertEqual(len(errors), 1)
+        self.assertIn('master execution failed', str(errors[0]))
+        self.assertFalse(any(record[2]['final'] for record in records))
+        self.assertEqual(set(self.stop_ids), {0, 1})
+
+    def test_stop_while_arming_never_starts_master(self):
+        rig = self.make_rig()
+        rig.wires[1].arm_gate.clear()
+        _, errors, finished = self.collect_async(rig.devices.run_stream(4, [2]))
+        self.assertTrue(rig.wires[1].sent.wait(1))
+        rig.devices.session.stop()
+        self.assertTrue(finished.wait(1))
+        self.assertIsInstance(errors[0], AcquisitionAborted)
+        self.assertEqual(rig.wires[0].requests, [])
+        self.assertEqual(set(self.stop_ids), {0, 1})
+
+    def test_stop_while_streaming_stops_all_boards(self):
+        rig = self.make_rig()
+        for wire in rig.wires:
+            wire.finish_gate.clear()
+        stream = rig.devices.run_stream(4, [2])
+        next(stream)
+        rig.devices.session.stop()
+        with self.assertRaises(AcquisitionAborted):
+            list(stream)
+        self.assertEqual(set(self.stop_ids), {0, 1})
+        self.assertEqual(rig.devices.session.state, AcquisitionState.ABORTED)
+
+    def test_close_stream_early_stops_all_boards_and_workers(self):
+        rig = self.make_rig()
+        for wire in rig.wires:
+            wire.finish_gate.clear()
+        stream = rig.devices.run_stream(4, [2])
+        next(stream)
+        stream.close()
+        self.assertEqual(set(self.stop_ids), {0, 1})
+        self.assertTrue(all(wire.closed.is_set() for wire in rig.wires))
+
+    def test_armed_timeout_stops_all_boards(self):
+        rig = self.make_rig()
+        rig.wires[1].arm_gate.clear()
+        with self.assertRaisesRegex(TimeoutError, 'waiting for MIMO slaves'):
+            list(rig.devices.run_stream(4, [2]))
+        self.assertEqual(rig.wires[0].requests, [])
+        self.assertEqual(set(self.stop_ids), {0, 1})
+
+    def test_rx_eof_before_final_is_failure(self):
+        rig = self.make_rig()
+        rig.wires[1].drop_final = True
+        with self.assertRaisesRegex(ConnectionError, 'before its final reply'):
+            list(rig.devices.run_stream(4, [2]))
+        self.assertEqual(rig.devices.session.state, AcquisitionState.FAILED)
+        self.assertEqual(set(self.stop_ids), {0, 1})
+
+    def test_missing_armed_is_failure_without_starting_master(self):
+        rig = self.make_rig()
+        rig.wires[1].omit_armed = True
+        with self.assertRaisesRegex(RuntimeError, 'required armed event'):
+            list(rig.devices.run_stream(4, [2]))
+        self.assertEqual(rig.wires[0].requests, [])
+
+    def test_invalid_or_multiple_channels_are_rejected_before_sending(self):
+        for channels in (None, [], [0, 2], [-1], [4], [1.5]):
+            with self.subTest(channels=channels):
+                rig = self.make_rig()
+                with self.assertRaises((ValueError, NotImplementedError)):
+                    list(rig.devices.run_stream(4, channels))
+                self.assertTrue(all(not wire.requests for wire in rig.wires))
+
+    def test_missing_master_or_rx_sequence_is_rejected_before_sending(self):
+        for missing in (0, 1):
+            rig = self.make_rig()
+            rig.devices.dev(missing)._seq = None
+            with self.assertRaisesRegex(ValueError, 'both have sequence data'):
+                list(rig.devices.run_stream(4, [2]))
+            self.assertEqual(rig.devices.session.participating_board_ids, ())
+        self.assertEqual(self.stop_ids, [])
+
+    def test_compile_failure_does_not_register_or_start_boards(self):
+        rig = self.make_rig()
+        with mock.patch.object(rig.devices.dev(1), 'prepare', side_effect=RuntimeError('compile failed')):
+            with self.assertRaisesRegex(RuntimeError, 'compile failed'):
+                list(rig.devices.run_stream(4, [2]))
+        self.assertEqual(rig.devices.session.participating_board_ids, ())
+        self.assertEqual(self.stop_ids, [])
+        self.assertTrue(all(not wire.requests for wire in rig.wires))
+
+    def test_repeated_scans_reuse_session_and_rearm_slaves(self):
+        rig = self.make_rig()
+        for _ in range(2):
+            rig.master_started.clear()
+            for wire in rig.wires:
+                wire.armed.clear()
+            records = list(rig.devices.run_stream(4, [2]))
+            self.assertEqual(rig.armed_at_start, [True])
+            self.assertEqual(len(records), 2)
+        self.assertEqual(len(rig.wires[1].requests), 2)
+        self.assertEqual({request['acquisition_id'] for request in rig.wires[1].requests},
+                         {rig.devices.session.acquisition_id})
+
+
+class StreamArmedProtocolTest(unittest.TestCase):
+    def test_armed_is_reported_once_and_not_exposed_as_chunk(self):
+        packet = DeviceProtocolTest.reply
+        device = DeviceProtocolTest.make_device([
+            packet({'armed': True, 'final': False}),
+            packet({'armed': True, 'final': False}),
+            packet({'rx1_i': [1], 'rx1_q': [2], 'chunk_index': 0, 'final': True}),
+        ])
+        armed = []
+        records = list(device.run_stream(4, [1], report_armed=True, on_armed=lambda: armed.append(True)))
+        self.assertEqual(armed, [True])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(set(records[0][0]), {'rx1'})
+        request = msgpack.unpackb(device._s.sent[0], raw=False)[4]['run_seq']
+        self.assertTrue(request['report_armed'])
+
+    def test_zero_chunk_size_preserves_armed_handshake(self):
+        packet = DeviceProtocolTest.reply
+        device = DeviceProtocolTest.make_device([
+            packet({'armed': True, 'final': False}),
+            packet({'rx0_i': [1], 'rx0_q': [2], 'final': True}),
+        ])
+        armed = []
+        records = list(device.run_stream(0, [0], report_armed=True, on_armed=lambda: armed.append(True)))
+        self.assertEqual(armed, [True])
+        self.assertEqual(len(records), 1)
+        self.assertTrue(records[0][2]['final'])
 
 
 if __name__ == "__main__":
