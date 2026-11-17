@@ -201,14 +201,22 @@ class MimoDevices:
         events = queue.Queue()
         threads = []
 
-        def slave_worker(board_id, dev):
+        def board_worker(board_id, dev):
             try:
+                if board_id == 0:
+                    callbacks = {
+                        "on_started": lambda: self._advance_to_running(session, on_started)
+                    }
+                else:
+                    callbacks = {
+                        "report_armed": True,
+                        "on_armed": lambda: events.put(("armed", board_id, None)),
+                    }
                 result = dev.run(
-                    report_armed=True,
-                    on_armed=lambda: events.put(("armed", board_id, None)),
                     rearm=True,
                     send_context=session.send_guard,
                     acquisition_id=session.acquisition_id,
+                    **callbacks,
                 )
                 events.put(("done", board_id, result))
             except BaseException as exc:
@@ -219,7 +227,7 @@ class MimoDevices:
             dev = self._devs[board_id]
             session.checkpoint()
             thread = threading.Thread(
-                target=slave_worker,
+                target=board_worker,
                 args=(board_id, dev),
                 name=f"marga-slave-{board_id}",
                 daemon=True,
@@ -256,16 +264,19 @@ class MimoDevices:
         session.checkpoint()
         session.transition(AcquisitionState.STARTING_MASTER)
         results = [self._inactive_result() for _ in self._devs]
-        results[0] = self._devs[0].run(
-            rearm=True,
-            on_started=lambda: self._advance_to_running(session, on_started),
-            send_context=session.send_guard,
-            acquisition_id=session.acquisition_id,
+        # Keep receiving slave failures while the master waits for its reply.
+        thread = threading.Thread(
+            target=board_worker,
+            args=(0, self._devs[0]),
+            name="marga-master",
+            daemon=True,
         )
+        thread.start()
+        threads.append(thread)
 
         completed = set()
 
-        while len(completed) < len(slave_board_ids):
+        while len(completed) < len(active_board_ids):
             session.checkpoint()
             try:
                 kind, board_id, payload = events.get(timeout=0.05)
