@@ -251,6 +251,122 @@ class AcquisitionSessionTest(unittest.TestCase):
         self.assertEqual(session.state, AcquisitionState.ABORTED)
 
 
+class RxGainTest(unittest.TestCase):
+    gains = {0: 100, 1: 50, 2: 10, 3: 0}
+    expected_writes = [(0, 0), (1, 12), (2, 40), (3, 63)]
+
+    def setUp(self):
+        # No constructor or run-path regression may open a real connection.
+        guard = mock.patch("socket.socket", side_effect=AssertionError("Hardware I/O forbidden"))
+        guard.start()
+        self.addCleanup(guard.stop)
+
+    def make_devices(self, count=1, gains=None, clock=125.0):
+        devices = MimoDevices(
+            ips=["offline"] * count,
+            ports=[11111] * count,
+            prev_socket=object(),
+            init_gpa=False,
+            fpga_clk_freq_MHz=clock,
+            grad_board="ocra1_5761",
+            rx_gain=dict(self.gains if gains is None else gains),
+            trig_output_time=10000,
+            auto_leds=True,
+            allow_user_init_cfg=True,
+        )
+        for dev in devices.dev_list():
+            dev.add_flodict({
+                "tx0": (np.array([1000., 2000.]), np.array([0.1 + 0.2j, 0j])),
+                "rx0_en": (np.array([1000., 2000.]), np.array([1, 0])),
+                "grad_vx": (np.array([1000., 2000.]), np.array([0.01, 0.])),
+            })
+        return devices
+
+    @staticmethod
+    def gain_writes(dev):
+        """Read channel/code pairs latched at gain-write strobes."""
+        registers = dict(zip(*dev._seq["rxgain_reg"]))
+        address_times = [t for t, value in zip(*dev._seq["rxgain_sel"]) if value == 1]
+        writes = []
+        for time, value in zip(*dev._seq["rxgain_write"]):
+            if value == 1:
+                address_time = max(t for t in address_times if t < time)
+                value_time = max(t for t in registers if t < time)
+                writes.append((int(registers[address_time]), int(registers[value_time])))
+        return writes
+
+    def test_single_board_programs_all_gains_without_mimo_trigger(self):
+        for clock in (122.88, 125.0):
+            with self.subTest(clock=clock):
+                dev = self.make_devices(clock=clock).dev(0)
+                dev.prepare()
+                self.assertEqual(self.gain_writes(dev), self.expected_writes)
+                self.assertFalse(dev._mimo_master)
+                self.assertEqual(dev._trig_wait_time, 0)
+                self.assertNotIn("trig_out", dev._seq)
+
+    def test_gain_edit_changes_machine_code_but_not_other_waveforms(self):
+        low = self.make_devices(gains={0: 1, 1: 100}).dev(0)
+        high = self.make_devices(gains={0: 100, 1: 100}).dev(0)
+        low.prepare()
+        high.prepare()
+        self.assertFalse(np.array_equal(low._machine_code, high._machine_code))
+        self.assertEqual(self.gain_writes(low), [(0, 63), (1, 0)])
+        self.assertEqual(self.gain_writes(high), [(0, 0), (1, 0)])
+        for key in low._seq:
+            if not key.startswith("rxgain_"):
+                for actual, expected in zip(low._seq[key], high._seq[key]):
+                    np.testing.assert_array_equal(actual, expected, err_msg=key)
+
+    def test_multiple_boards_only_program_gain_on_master(self):
+        devices = self.make_devices(count=3)
+        for dev in devices.dev_list():
+            dev.prepare()
+        self.assertEqual(self.gain_writes(devices.dev(0)), self.expected_writes)
+        self.assertIn("trig_out", devices.dev(0)._seq)
+        for dev in devices.dev_list()[1:]:
+            self.assertEqual(self.gain_writes(dev), [])
+            self.assertEqual(dev._trig_wait_time, -1)
+            self.assertNotIn("trig_out", dev._seq)
+
+    def test_inactive_slaves_preserve_gain_when_sync_is_disabled(self):
+        devices = self.make_devices(count=2)
+        master = devices.dev(0)
+        devices.dev(1)._seq = None
+        # Exercise the actual active-board selection and preparation in run().
+        # Stop at the transport boundary, after compiling the real master.
+        with mock.patch.object(devices, "_run_single", return_value=[]) as transport:
+            devices.run()
+        transport.assert_called_once()
+        self.assertEqual(self.gain_writes(master), self.expected_writes)
+        self.assertFalse(master._mimo_master)
+        self.assertNotIn("trig_out", master._seq)
+        direct = self.make_devices().dev(0)
+        direct.prepare()
+        np.testing.assert_array_equal(master._machine_code, direct._machine_code)
+
+    def test_repeated_prepare_keeps_gain_writes_and_machine_code_stable(self):
+        dev = self.make_devices().dev(0)
+        dev.prepare()
+        original = dev._machine_code.copy()
+        dev.prepare()
+        self.assertEqual(self.gain_writes(dev), self.expected_writes)
+        np.testing.assert_array_equal(dev._machine_code, original)
+
+    def test_direct_device_retains_legacy_gain_ownership(self):
+        for master in (False, True):
+            with self.subTest(master=master):
+                dev = Device(prev_socket=object(), mimo_master=master,
+                             rx_gain=dict(self.gains), auto_leds=False,
+                             fpga_clk_freq_MHz=125.0, grad_board="ocra1_5761")
+                dev.add_flodict({"rx0_en": (np.array([1000., 2000.]), np.array([1, 0]))})
+                if master:
+                    dev.disable_mimo_sync()
+                dev.prepare()
+                self.assertEqual(self.gain_writes(dev), self.expected_writes if master else [])
+                self.assertNotIn("trig_out", dev._seq)
+
+
 class MimoBarrierTest(unittest.TestCase):
     def setUp(self):
         _FakeDevice.reset()

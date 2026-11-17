@@ -123,6 +123,9 @@ class MimoDevices:
 
             dev = self.device_class(
                 ip_address=ip, port=port, **kwargs)
+            # Board 0 owns the RX gain bus independently of MIMO sync. Keep
+            # this out of constructor kwargs for legacy Device adapters.
+            dev._rx_gain_control = (k == 0)
 
             self._devs.append(dev)
             self._pool_args.append((dev, 0))

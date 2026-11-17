@@ -142,6 +142,9 @@ class Device:
         self._auto_leds = auto_leds
 
         self._mimo_master = mimo_master
+        # Gain-bus ownership must survive disable_mimo_sync(). MimoDevices
+        # also assigns it to board 0 when starting directly with a single board.
+        self._rx_gain_control = mimo_master
         if self._mimo_master:
             self._trig_output_time = trig_output_time
             self._slave_trig_latency = slave_trig_latency
@@ -510,8 +513,9 @@ class Device:
             # to all the regular channels during compilation
             self.add_flodict({'trig_out': (np.array([-self._slave_trig_latency, -self._slave_trig_latency + 1]), np.array([1, 0]))})
 
-            
-            
+        # The primary board programs RX gains even without MIMO triggering.
+        # Slave boards must not issue competing writes to the gain bus.
+        if self._rx_gain_control:
             time_base = tstart + rx_wait
             rxgain_dict = {
                 'rxgain_sel': [[], []],
