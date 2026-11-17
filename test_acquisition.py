@@ -108,10 +108,14 @@ class AcquisitionSessionTest(unittest.TestCase):
     def test_stop_while_preparing_is_local_and_latched(self):
         session = AcquisitionSession()
         session.begin()
-        self.assertEqual(session.stop(), {})
-        self.assertEqual(session.state, AcquisitionState.ABORTED)
-        with self.assertRaises(AcquisitionAborted):
-            session.checkpoint()
+        acquisition_id = session.acquisition_id
+        for _ in range(3):
+            session.request_cancel()
+            self.assertEqual(session.stop(), {})
+            self.assertEqual(session.state, AcquisitionState.ABORTED)
+            self.assertEqual(session.acquisition_id, acquisition_id)
+            with self.assertRaises(AcquisitionAborted):
+                session.checkpoint()
 
     def test_emergency_stop_targets_all_boards_concurrently(self):
         session = AcquisitionSession()
@@ -157,9 +161,16 @@ class AcquisitionSessionTest(unittest.TestCase):
 
         with mock.patch.object(
             AcquisitionSession, "_stop_board", return_value="stopped"
-        ):
+        ) as stop_board:
             self.assertEqual(session.stop(), {0: "stopped"})
-        self.assertEqual(session.state, AcquisitionState.IDLE)
+            self.assertEqual(session.stop(), {0: "stopped"})
+        stop_board.assert_called_once()
+        self.assertEqual(session.state, AcquisitionState.FAILED)
+        with self.assertRaises(AcquisitionAborted):
+            session.checkpoint()
+        session.begin()
+        session.checkpoint()
+        self.assertEqual(session.state, AcquisitionState.PREPARING)
 
     def test_terminal_stop_returns_to_idle(self):
         session = AcquisitionSession()
@@ -168,19 +179,53 @@ class AcquisitionSessionTest(unittest.TestCase):
         session.stop()
         self.assertEqual(session.state, AcquisitionState.IDLE)
 
-    def test_second_stop_after_confirmed_abort_returns_to_idle(self):
+    def test_repeated_stop_after_confirmed_abort_stays_latched(self):
         session = AcquisitionSession()
         session.begin()
         session.transition(AcquisitionState.STARTING_MASTER)
         session.register_board(0, "master", 11111, "ocra1")
         with mock.patch.object(
             AcquisitionSession, "_stop_board", return_value="stopped"
-        ):
+        ) as stop_board:
             self.assertEqual(session.stop(), {0: "stopped"})
+            stopped = session.snapshot()
+            for _ in range(3):
+                session.request_cancel()
+                self.assertEqual(session.stop(), {0: "stopped"})
+                self.assertEqual(session.snapshot(), stopped)
+                with self.assertRaises(AcquisitionAborted):
+                    session.checkpoint()
 
+        stop_board.assert_called_once()
         self.assertEqual(session.state, AcquisitionState.ABORTED)
-        self.assertEqual(session.stop(), {})
-        self.assertEqual(session.state, AcquisitionState.IDLE)
+        session.begin()
+        session.checkpoint()
+        self.assertEqual(session.state, AcquisitionState.PREPARING)
+        self.assertNotEqual(session.acquisition_id, stopped["acquisition_id"])
+
+    def test_stop_after_failure_preserves_failure_and_safe_confirmation(self):
+        for already_stopped in (False, True):
+            with self.subTest(already_stopped=already_stopped):
+                session = AcquisitionSession()
+                session.begin()
+                session.transition(AcquisitionState.STARTING_MASTER)
+                session.register_board(0, "master", 11111, "ocra1")
+                acquisition_id = session.acquisition_id
+                with mock.patch.object(
+                    AcquisitionSession, "_stop_board", return_value="stopped"
+                ) as stop_board:
+                    session.fail(stop_hardware=already_stopped)
+                    for _ in range(3):
+                        self.assertEqual(session.stop(), {0: "stopped"})
+                        self.assertEqual(session.state, AcquisitionState.FAILED)
+                        self.assertEqual(session.acquisition_id, acquisition_id)
+                        self.assertEqual(session.participating_board_ids, (0,))
+                        with self.assertRaises(AcquisitionAborted):
+                            session.checkpoint()
+                stop_board.assert_called_once()
+                session.begin()
+                session.checkpoint()
+                self.assertEqual(session.state, AcquisitionState.PREPARING)
 
     def test_cancel_latch_then_background_stop_still_dispatches(self):
         session = AcquisitionSession()

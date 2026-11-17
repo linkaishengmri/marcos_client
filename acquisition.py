@@ -332,8 +332,9 @@ class AcquisitionSession:
         """Request Stop and concurrently emergency-stop every participating board.
 
         In ``PREPARING`` there are no registered boards, so this is a purely
-        local cooperative cancellation.  Calling Stop in a terminal state
-        returns the session to ``IDLE`` as required by the lifecycle contract.
+        local cooperative cancellation.  Aborted/failed sessions stay latched
+        until an explicit ``begin()``; repeated Stop must not let unfinished
+        work interpret IDLE as a new acquisition.  FINISHED may return to IDLE.
         """
         # A second concurrently arriving Stop waits for the first dispatch and
         # returns its result.  It must not interpret ABORTED as a later terminal
@@ -344,16 +345,16 @@ class AcquisitionSession:
 
         try:
             notify_aborted = False
-            reset_after_dispatch = False
             with self._lock:
                 current = self._state
                 if current == AcquisitionState.ABORTED:
                     if self._stop_dispatched:
-                        reset_terminal = True
+                        return dict(self._last_stop_results)
                     else:
                         reset_terminal = False
                         self._stop_dispatched = True
                 elif current == AcquisitionState.FAILED:
+                    self._cancel_event.set()
                     needs_retry = bool(self._boards) and (
                         not self._stop_dispatched
                         or any(
@@ -361,10 +362,10 @@ class AcquisitionSession:
                             for result in self._last_stop_results.values()
                         )
                     )
-                    reset_terminal = not needs_retry
-                    reset_after_dispatch = needs_retry
-                    if needs_retry:
-                        self._stop_dispatched = True
+                    if not needs_retry:
+                        return dict(self._last_stop_results)
+                    reset_terminal = False
+                    self._stop_dispatched = True
                 elif current == AcquisitionState.FINISHED:
                     reset_terminal = True
                 elif current == AcquisitionState.IDLE:
@@ -382,10 +383,7 @@ class AcquisitionSession:
 
             if notify_aborted:
                 self._notify(AcquisitionState.ABORTED)
-            results = self._stop_participating_boards(timeout)
-            if reset_after_dispatch and not self.stop_failures:
-                self.reset()
-            return results
+            return self._stop_participating_boards(timeout)
         finally:
             self._stop_lock.release()
 
