@@ -525,17 +525,17 @@ class Device:
             rxgain_dict=build_rxgain_dict(rxgain_dict, self._rx_gain, time_base, append=False, fpga_clk_freq_MHz=self._fpga_clk_freq_MHz)
             self.add_flodict(rxgain_dict)
             
+        # Original PKspec reports the master sequence endpoint in seconds,
+        # before automatic LED/initialization events are appended.
+        ultimate_time = 0
+        for times, _values in (self._seq or {}).values():
+            if len(times):
+                ultimate_time = max(ultimate_time, times[-1])
+        self.total_time_in_second = float(ultimate_time / self._fpga_clk_freq_MHz * 1e-6)
+
         # Automatic LED scan
         if self._auto_leds:
             led_steps = 256
-
-            # find max time used in system
-            ultimate_time = 0
-            for k in self._seq:
-                loc_last_time = self._seq[k][0][-1]
-                if loc_last_time > ultimate_time:
-                    ultimate_time = loc_last_time
-
             if ultimate_time < 256:
                 led_steps = ultimate_time
             led_times = np.linspace(tstart, ultimate_time + tstart, 256).astype(
